@@ -1,0 +1,30 @@
+odes:
+    - stateId: x
+      rightHandSide: -theta * x
+      initialValue: 1
+
+    - stateId: z_1
+      rightHandSide: z_prime(x, tau, d_1, t_1, sigma_x, sigma_t)
+      initialValue: 0
+    - stateId: z_2
+      rightHandSide: z_prime(x, tau, d_2, t_2, sigma_x, sigma_t)
+      initialValue: 0
+
+parameters:
+    - parameterId: theta
+      nominalValue: 1
+    - parameterId: d_1
+    - parameterId: d_2
+    - parameterId: t_1
+    - parameterId: t_2
+    - parameterId: sigma_x
+    - parameterId: sigma_t
+
+time:
+    variable: tau
+
+functions:
+    - functionId: z_prime
+      arguments: x, tau, d, t, sigma_x, sigma_t
+      formula:  exp(-1/2 * ((x - d)^2/sigma_x^2 +
+                           (tau-t)^2 / sigma_t^2))

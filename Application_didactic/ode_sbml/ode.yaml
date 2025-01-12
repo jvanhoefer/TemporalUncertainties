@@ -1,0 +1,8 @@
+odes:
+    - stateId: x
+      rightHandSide: -theta * x
+      initialValue: 1
+
+parameters:
+    - parameterId: theta
+      nominalValue: 1

@@ -1,0 +1,145 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sbml xmlns="http://www.sbml.org/sbml/level3/version1/core" level="3" version="1">
+  <model id="ode_extended" name="ode_extended">
+    <listOfFunctionDefinitions>
+      <functionDefinition id="z_prime">
+        <math xmlns="http://www.w3.org/1998/Math/MathML">
+          <lambda>
+            <bvar>
+              <ci> x </ci>
+            </bvar>
+            <bvar>
+              <ci> tau </ci>
+            </bvar>
+            <bvar>
+              <ci> d </ci>
+            </bvar>
+            <bvar>
+              <ci> t </ci>
+            </bvar>
+            <bvar>
+              <ci> sigma_x </ci>
+            </bvar>
+            <bvar>
+              <ci> sigma_t </ci>
+            </bvar>
+            <apply>
+              <exp/>
+              <apply>
+                <times/>
+                <apply>
+                  <divide/>
+                  <apply>
+                    <minus/>
+                    <cn type="integer"> 1 </cn>
+                  </apply>
+                  <cn type="integer"> 2 </cn>
+                </apply>
+                <apply>
+                  <plus/>
+                  <apply>
+                    <divide/>
+                    <apply>
+                      <power/>
+                      <apply>
+                        <minus/>
+                        <ci> x </ci>
+                        <ci> d </ci>
+                      </apply>
+                      <cn type="integer"> 2 </cn>
+                    </apply>
+                    <apply>
+                      <power/>
+                      <ci> sigma_x </ci>
+                      <cn type="integer"> 2 </cn>
+                    </apply>
+                  </apply>
+                  <apply>
+                    <divide/>
+                    <apply>
+                      <power/>
+                      <apply>
+                        <minus/>
+                        <ci> tau </ci>
+                        <ci> t </ci>
+                      </apply>
+                      <cn type="integer"> 2 </cn>
+                    </apply>
+                    <apply>
+                      <power/>
+                      <ci> sigma_t </ci>
+                      <cn type="integer"> 2 </cn>
+                    </apply>
+                  </apply>
+                </apply>
+              </apply>
+            </apply>
+          </lambda>
+        </math>
+      </functionDefinition>
+    </listOfFunctionDefinitions>
+    <listOfCompartments>
+      <compartment id="Compartment" size="1" constant="true"/>
+    </listOfCompartments>
+    <listOfSpecies>
+      <species id="x" compartment="Compartment" initialAmount="1" hasOnlySubstanceUnits="false" boundaryCondition="false" constant="false"/>
+      <species id="z_1" compartment="Compartment" initialAmount="0" hasOnlySubstanceUnits="false" boundaryCondition="false" constant="false"/>
+      <species id="z_2" compartment="Compartment" initialAmount="0" hasOnlySubstanceUnits="false" boundaryCondition="false" constant="false"/>
+    </listOfSpecies>
+    <listOfParameters>
+      <parameter id="theta" name="theta" value="1" constant="true"/>
+      <parameter id="d_1" name="d_1" constant="true"/>
+      <parameter id="d_2" name="d_2" constant="true"/>
+      <parameter id="t_1" name="t_1" constant="true"/>
+      <parameter id="t_2" name="t_2" constant="true"/>
+      <parameter id="sigma_x" name="sigma_x" constant="true"/>
+      <parameter id="sigma_t" name="sigma_t" constant="true"/>
+      <parameter id="tau" name="tau" constant="false"/>
+    </listOfParameters>
+    <listOfRules>
+      <rateRule variable="x">
+        <math xmlns="http://www.w3.org/1998/Math/MathML">
+          <apply>
+            <times/>
+            <apply>
+              <minus/>
+              <ci> theta </ci>
+            </apply>
+            <ci> x </ci>
+          </apply>
+        </math>
+      </rateRule>
+      <rateRule variable="z_1">
+        <math xmlns="http://www.w3.org/1998/Math/MathML">
+          <apply>
+            <ci> z_prime </ci>
+            <ci> x </ci>
+            <ci> tau </ci>
+            <ci> d_1 </ci>
+            <ci> t_1 </ci>
+            <ci> sigma_x </ci>
+            <ci> sigma_t </ci>
+          </apply>
+        </math>
+      </rateRule>
+      <rateRule variable="z_2">
+        <math xmlns="http://www.w3.org/1998/Math/MathML">
+          <apply>
+            <ci> z_prime </ci>
+            <ci> x </ci>
+            <ci> tau </ci>
+            <ci> d_2 </ci>
+            <ci> t_2 </ci>
+            <ci> sigma_x </ci>
+            <ci> sigma_t </ci>
+          </apply>
+        </math>
+      </rateRule>
+      <assignmentRule variable="tau">
+        <math xmlns="http://www.w3.org/1998/Math/MathML">
+          <csymbol encoding="text" definitionURL="http://www.sbml.org/sbml/symbols/time"> time </csymbol>
+        </math>
+      </assignmentRule>
+    </listOfRules>
+  </model>
+</sbml>
