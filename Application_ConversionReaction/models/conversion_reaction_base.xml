@@ -1,0 +1,62 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sbml xmlns="http://www.sbml.org/sbml/level3/version1/core" level="3" version="1">
+  <model id="conversion_reaction_base" name="conversion_reaction_base">
+    <listOfCompartments>
+      <compartment id="Compartment" size="1" constant="true"/>
+    </listOfCompartments>
+    <listOfSpecies>
+      <species id="A" compartment="Compartment" initialAmount="1" hasOnlySubstanceUnits="false" boundaryCondition="false" constant="false"/>
+      <species id="B" compartment="Compartment" initialAmount="0" hasOnlySubstanceUnits="false" boundaryCondition="false" constant="false"/>
+    </listOfSpecies>
+    <listOfParameters>
+      <parameter id="k_1" name="k_1" value="1" constant="true"/>
+      <parameter id="k_2" name="k_2" value="1" constant="true"/>
+      <parameter id="k_3" name="k_3" value="1" constant="true"/>
+      <parameter id="k_4" name="k_4" value="1" constant="true"/>
+    </listOfParameters>
+    <listOfRules>
+      <rateRule variable="A">
+        <math xmlns="http://www.w3.org/1998/Math/MathML">
+          <apply>
+            <plus/>
+            <apply>
+              <minus/>
+              <ci> k_1 </ci>
+              <apply>
+                <times/>
+                <ci> k_2 </ci>
+                <ci> A </ci>
+              </apply>
+            </apply>
+            <apply>
+              <times/>
+              <ci> k_3 </ci>
+              <ci> B </ci>
+            </apply>
+          </apply>
+        </math>
+      </rateRule>
+      <rateRule variable="B">
+        <math xmlns="http://www.w3.org/1998/Math/MathML">
+          <apply>
+            <minus/>
+            <apply>
+              <times/>
+              <ci> k_2 </ci>
+              <ci> A </ci>
+            </apply>
+            <apply>
+              <times/>
+              <apply>
+                <plus/>
+                <ci> k_3 </ci>
+                <ci> k_4 </ci>
+              </apply>
+              <ci> B </ci>
+            </apply>
+          </apply>
+        </math>
+      </rateRule>
+    </listOfRules>
+  </model>
+</sbml>

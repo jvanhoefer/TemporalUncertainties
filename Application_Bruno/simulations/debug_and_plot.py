@@ -134,7 +134,7 @@ tau_df = pd.read_csv(
 def visualize_for_condition(
     condition: str, 
     amici_model: amici.Model,
-    theta: np.ndarray,
+    thetas: np.ndarray,
     plot_errorbars: bool = False,
     save_in_dir: str = None
 ):
@@ -153,8 +153,8 @@ def visualize_for_condition(
         save_in_dir: str
             The directory to save the plots. If None, the plots are not saved
     """
-    theta_estimate, taus, sigma_tau = _theta_extended_to_thetas(theta)
-
+    theta_estimate, taus, sigma_tau = _theta_extended_to_thetas(theta, log_trafo=True, hierarchical_sigma_tau=HIERARCHICAL_SIGMA_TAU)
+    print(theta_estimate)
     # dp_dicts contains a) all predictions and b) all data.
     dp_dicts = _simulate_single_data_point_dicts_for_condition(condition, theta, amici_model)
     amici_model = set_parameters_for_condition(condition, theta_estimate, amici_model)
@@ -196,7 +196,7 @@ def visualize_for_condition(
                     plt.errorbar(
                         dp["t"], dp["data"], 
                         yerr=dp["sigma_y"], # in observable direction
-                        xerr=theta[-1],  # in time direction
+                        xerr=sigma_tau,  # in time direction
                         fmt='o',
                         color="red",
                         ecolor="gray",
@@ -221,6 +221,8 @@ def visualize_for_condition(
         plt.show()
         plt.close()
 
+# theta = result_full_multi_tau.optimize_result.grad[0]
+theta = result_full_multi_tau.optimize_result.x[0]
 save_in_dir = "Application_Bruno/data/plots"
 for condition in tau_df["simulationConditionId"].unique():
     visualize_for_condition(

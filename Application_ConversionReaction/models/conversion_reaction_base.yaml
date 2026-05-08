@@ -1,0 +1,25 @@
+odes:
+
+    - stateId: A
+      rightHandSide: 'k_1 - k_2 * A + k_3 * B'
+      initialValue: 1
+
+    - stateId: B
+      rightHandSide: k_2 * A - (k_3 + k_4) * B
+      initialValue: 0
+
+
+parameters:
+
+    - parameterId: k_1
+      nominalValue: 1
+      
+    - parameterId: k_2
+      nominalValue: 1
+
+    - parameterId: k_3
+      nominalValue: 1
+
+    - parameterId: k_4
+      nominalValue: 1
+

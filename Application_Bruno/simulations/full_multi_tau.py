@@ -8,8 +8,6 @@ i.e. all taus are additional model parameters.
 
 Further No taus are shared, i.e. every data point has its own tau.
 """
-
-
 import amici
 import numpy as np
 import libsbml as sbml
@@ -18,6 +16,56 @@ from pypesto.petab import PetabImporter
 from copy import deepcopy
 import pandas as pd
 from typing import List, Tuple
+import shutil
+import os
+
+from scipy.stats import norm 
+
+# if true, the distribution of tau is a truncated Gaussian, i.e. tau >= 0, otherwise it is a Gaussian
+# this leads to a correction in the log-likelihood...
+# TRUNCATED_GAUSSIAN = True
+# TRUNCATED_GAUSSIAN = True
+TRUNCATED_GAUSSIAN = False
+HIERARCHICAL_SIGMA_TAU = not TRUNCATED_GAUSSIAN
+
+"""
+RUN SIMULATIONS: A) REMOVE ALL OLD MODELS ETC.
+"""
+
+# check if the results subfolder exists, otherwise create it
+result_folder = "/Users/jakobvanhoefer/Documents/PhD/Projects/Temporal Uncertainties/Application_Bruno/simulations/results/full_multi_tau"
+os.makedirs(result_folder, exist_ok=True)
+
+
+# delete all amici folders with content and subfolders:
+amici_files = [
+    "/Users/jakobvanhoefer/Documents/PhD/Projects/Temporal Uncertainties/Application_Bruno/amici_models", 
+    "/Users/jakobvanhoefer/Documents/PhD/Projects/Temporal Uncertainties/Application_Bruno/simulations/amici_models", 
+    "/Users/jakobvanhoefer/Documents/PhD/Projects/Temporal Uncertainties/amici_models", 
+    "/Users/jakobvanhoefer/Documents/PhD/Projects/Temporal Uncertainties/Application_Bruno/simulations/ode_sbml",
+    "/Users/jakobvanhoefer/Documents/PhD/Projects/Temporal Uncertainties/Application_Bruno/amici"
+]
+
+for amici_folder in amici_files:
+    shutil.rmtree(amici_folder, ignore_errors=True)
+
+"""
+Get the first model (after sorting) for which no result exists yet...
+"""
+petab_dir = "/Users/jakobvanhoefer/Documents/PhD/Projects/Temporal Uncertainties/Application_Bruno/simulations/PEtab_versions"
+petab_models = sorted(f for f in os.listdir(petab_dir) if os.path.isdir(os.path.join(petab_dir, f)))
+
+exisiting_results = sorted(os.path.splitext(f)[0] for f in os.listdir(result_folder))
+# get the list of all models, for which no result exists yet:
+models_to_run = sorted([model for model in petab_models if model not in exisiting_results])
+model_to_run = models_to_run[0]
+# model_to_run= "sigma_tau_0_0"
+
+petab_yaml = f"/Users/jakobvanhoefer/Documents/PhD/Projects/Temporal Uncertainties/Application_Bruno/simulations/PEtab_versions/{model_to_run}/Bruno_JExpBot2016.yaml"
+
+print(f"Running model {model_to_run} with wrong time points")
+
+
 
 # Set up the model import
 sbml_importer = amici.SbmlImporter("/Users/jakobvanhoefer/Documents/PhD/Projects/Temporal Uncertainties/Application_Bruno/petab_bruno_original/model_Bruno_JExpBot2016.xml")
@@ -27,35 +75,34 @@ sbml_importer.sbml2amici(model_name, model_dir)
 model_module = amici.import_model_module(model_name, model_dir)
 amici_model = model_module.getModel()
 
-
-# Import the SBML model within libsbml
-sbml_model = sbml.readSBMLFromFile(
-    "/Users/jakobvanhoefer/Documents/PhD/Projects/Temporal Uncertainties/Application_Bruno/petab_bruno_original/model_Bruno_JExpBot2016.xml"
-).getModel()
-
 # create PEtab model, in order to get informations from there
-petab_yaml = "./Application_Bruno/petab_bruno_original/Bruno_JExpBot2016.yaml"
 importer = PetabImporter.from_yaml(petab_yaml)
 problem_wrong_tp = importer.create_problem(verbose=False)
 
-DELTA_TIME_BOUND = 5 # the time variables are bound by +/- delta time
+DELTA_TIME_BOUND = 10 # the time variables are bound by +/- delta time
+
+T_PETAB = importer.petab_problem.measurement_df['time'].values
 
 LB_FULL_MULTI_TAU = np.concatenate(
     [np.log10(importer.petab_problem.parameter_df['lowerBound'].values), 
-    importer.petab_problem.measurement_df['time'].values - DELTA_TIME_BOUND, 
+    np.zeros_like(T_PETAB), 
     [0]])
 
 UB_FULL_MULTI_TAU = np.concatenate([np.log10(importer.petab_problem.parameter_df['upperBound'].values), 
-    importer.petab_problem.measurement_df['time'].values + DELTA_TIME_BOUND, 
+    T_PETAB + DELTA_TIME_BOUND, 
     [5]])
 
+# read in the tau df, and correct for the right time points...
 tau_df = pd.read_csv(
-        "Application_Bruno/simulations/full_parametrization_df.tsv", sep="\t"
+        "/Users/jakobvanhoefer/Documents/PhD/Projects/Temporal Uncertainties/Application_Bruno/simulations/full_parametrization_df.tsv", 
+        sep="\t"
         ).reset_index()
+tau_df["time"] = T_PETAB
 
 def _theta_extended_to_thetas(
     theta_extended: np.array, 
-    log_trafo: bool = True
+    log_trafo: bool = True,
+    hierarchical_sigma_tau: bool = HIERARCHICAL_SIGMA_TAU
     ):
     """
     unpack the thetas.
@@ -73,10 +120,18 @@ def _theta_extended_to_thetas(
     else:
         theta_estimate = theta_extended[:13]
     
-    taus = theta_extended[13:-1]
-    sigma_tau = theta_extended[-1]
+    
+    if hierarchical_sigma_tau:
+        if TRUNCATED_GAUSSIAN:
+            raise NotImplementedError("Hierarchical sigma tau not implemented for truncated Gaussian yet.")
+        taus = theta_extended[13:]
+        sigma_tau = np.sqrt(np.sum((taus-T_PETAB)**2)/len(taus))
+    else:
+        taus = theta_extended[13:-1]
+        sigma_tau = theta_extended[-1]
     return theta_estimate, taus, sigma_tau
 
+PARAMETER_IDS = importer.petab_problem.get_x_ids()
 def _theta_estimate_to_dict(theta_estimate: np.array) -> dict:
     """
     Maps the theta_estimate to a dictionary, where the keys are the parameter ids
@@ -89,9 +144,20 @@ def _theta_estimate_to_dict(theta_estimate: np.array) -> dict:
     Returns:
         dict: A dictionary mapping parameter ids to their values.
     """
-    parameter_ids = importer.petab_problem.get_x_ids()
-    return {parameter_ids[i]: float(theta_estimate[i]) for i in range(len(theta_estimate))}
+    return {PARAMETER_IDS[i]: float(theta_estimate[i]) for i in range(len(theta_estimate))}
 
+
+"""
+Compute the needed condition df's once, in order to get a faster function eval later...
+"""
+conditions_as_dict = dict()
+condition_df = deepcopy(importer.petab_problem.condition_df).reset_index()
+    
+for condition in ["model1_data1", "model1_data2", "model1_data3", "model1_data4", "model1_data5", "model1_data6"]:
+    condition_as_dict = condition_df[condition_df["conditionId"] == condition].iloc[0].to_dict()
+    conditions_as_dict[condition] = condition_as_dict
+
+condition_df_keys = condition_df.keys()
 
 def set_parameters_for_condition(
     condition: str,
@@ -112,12 +178,11 @@ def set_parameters_for_condition(
     theta_estimate_as_dict = _theta_estimate_to_dict(theta_estimate)
 
     # CONDITION INFOS
-    condition_df = deepcopy(importer.petab_problem.condition_df).reset_index()
-    condition_as_dict = condition_df[condition_df['conditionId'] == condition].iloc[0].to_dict()
+    condition_as_dict = conditions_as_dict[condition]
  
     # SET THE PARAMETERS THAT ARE NOT CONDITION SPECIFIC   
     for parameter_id in amici_model.getParameterIds():
-        if parameter_id not in condition_df.keys():
+        if parameter_id not in condition_df_keys:
             value = theta_estimate_as_dict[parameter_id]
             amici_model.setParameterById(parameter_id, value)
 
@@ -167,7 +232,7 @@ def _simulate_single_data_point_dicts_for_condition(
         dict: A dictionary containing the simulation results.
     """
     # Set parameters for the condition
-    theta_estimate, taus, _ = _theta_extended_to_thetas(theta_extended)
+    theta_estimate, taus, _ = _theta_extended_to_thetas(theta_extended, hierarchical_sigma_tau=HIERARCHICAL_SIGMA_TAU)
     amici_model = set_parameters_for_condition(condition, theta_estimate, amici_model)
 
     # Get all the relevant infos from a slightly extended Parameter df
@@ -340,7 +405,7 @@ def neg_log_post_full_with_grad(
 
     Returns a posterior + gradient.
     """
-    theta_estimate, _, sigma_tau = _theta_extended_to_thetas(theta_extended)
+    theta_estimate, taus, sigma_tau = _theta_extended_to_thetas(theta_extended, hierarchical_sigma_tau=HIERARCHICAL_SIGMA_TAU)
 
     _simulated_datapoints_list = []
     for condition in ["model1_data1", "model1_data2", "model1_data3", "model1_data4", "model1_data5", "model1_data6"]:
@@ -364,13 +429,17 @@ def neg_log_post_full_with_grad(
 
         # check if sim is NaN
         if np.isnan(sim):
-            return np.inf
+            return np.inf, np.zeros_like(theta_extended)
 
         # calculate the obj function
         resid = sim - data
 
         neg_log_likelihood = 0.5 * (np.log(2*np.pi*sigma_y**2) + (resid**2) / (sigma_y**2))
         neg_log_prior_tau = 0.5 * (np.log(2*np.pi*sigma_tau**2) + ((tau - t)**2) / (sigma_tau**2))
+        
+        if TRUNCATED_GAUSSIAN:
+            # add the correction for the truncated Gaussian
+            neg_log_prior_tau += norm.logsf(0, loc=t, scale=sigma_tau)
 
         neg_log_post += neg_log_likelihood + neg_log_prior_tau
 
@@ -379,11 +448,23 @@ def neg_log_post_full_with_grad(
         # w.r.t tau => resid/sigma^2 * "grad_tau of sim" for the corresponding tau index
         # w.r.t sigma_tau => derivative of neg log prior w.r.t sigma_tau
         grad[:len(theta_estimate)] += (resid / sigma_y**2) * sim_dict["dsim_dtheta"]
-        grad[theta_extended_index] += (resid / sigma_y**2) * sim_dict["dsim_dtau"]  + (tau - t) / (sigma_tau**2)
-        grad[-1] += 1 / sigma_tau - ((tau - t)**2) / (sigma_tau**3)
+        
+        if HIERARCHICAL_SIGMA_TAU:
+            # do d/dtau (residual/sigma_y)^2
+            grad[theta_extended_index] += (resid / sigma_y**2) * sim_dict["dsim_dtau"]
+            # add d/dtau prior(tau)
+            grad[theta_extended_index] += (tau - t) / np.sqrt(len(taus) * np.sum((taus - T_PETAB)**2))
+        else:
+            grad[theta_extended_index] += (resid / sigma_y**2) * sim_dict["dsim_dtau"]  + (tau - t) / (sigma_tau**2)
+            grad[-1] += 1 / sigma_tau - ((tau - t)**2) / (sigma_tau**3)
+
+            if TRUNCATED_GAUSSIAN:
+                # add the correction for the truncated Gaussian
+                grad[-1] -= norm.pdf(0, loc=t, scale=sigma_tau) / norm.sf(0, loc=t, scale=sigma_tau)
 
     # do the log-trafo chain rule for theta_estimate
     grad[:len(theta_estimate)] *= 10 ** theta_extended[:13] * np.log(10)
+
 
     return float(neg_log_post), grad
 
@@ -397,37 +478,85 @@ import pypesto.store as store
 from pypesto.petab import PetabImporter
 
 
+
+"""
 def obj_fun(theta):
     return neg_log_post_full_with_grad(theta, amici_model)
+"""
+import threading
+from pypesto.engine import MultiThreadEngine
+engine = MultiThreadEngine(n_threads=os.cpu_count())
+
+_thread_local = threading.local()
+
+def _get_thread_local_model():
+    if not hasattr(_thread_local, 'amici_model'):
+        _thread_local.amici_model = model_module.getModel()
+    return _thread_local.amici_model
+
+def obj_fun(theta):
+    return neg_log_post_full_with_grad(theta, _get_thread_local_model())
 
 objective_full_multi_tau = pypesto.Objective(
     fun=obj_fun,
     grad=True,
 )
 
-problem_full_multi_tau = pypesto.Problem(
-    objective=objective_full_multi_tau,
-    lb=LB_FULL_MULTI_TAU,
-    ub=UB_FULL_MULTI_TAU)
+if HIERARCHICAL_SIGMA_TAU:
+    problem_full_multi_tau = pypesto.Problem(
+        objective=objective_full_multi_tau,
+        lb=LB_FULL_MULTI_TAU[:-1],
+        ub=UB_FULL_MULTI_TAU[:-1])
+else:
+    problem_full_multi_tau = pypesto.Problem(
+        objective=objective_full_multi_tau,
+        lb=LB_FULL_MULTI_TAU,
+        ub=UB_FULL_MULTI_TAU)
 
 
+N_STARTS = 1_000
+# N_SAMPLES = 200_000
+N_SAMPLES = None
+import fides
 
-fides_optimizer = optimize.FidesOptimizer(verbose=0)
-# fides_optimizer.options["maxiter"]=5_000
-# engine = pypesto.engine.MultiThreadEngine(n_threads=8)
+fides_optimizer = optimize.FidesOptimizer(verbose=0, hessian_update=fides.hessian_approximation.BFGS())
+
+fides_optimizer.options["maxiter"]=2_500
 
 # your optimizer stays the same
 result_full_multi_tau = optimize.minimize(
     problem_full_multi_tau,
     optimizer=fides_optimizer,
-    # engine=engine,
-    n_starts=100,
+    engine=engine,
+    n_starts=N_STARTS,
 )
 
-N_SAMPLES = 1_000_000
+"""
+import pypesto.profile as profile
+
+result = profile.parameter_profile(
+    problem=problem_full_multi_tau,
+    result=result_full_multi_tau,
+    optimizer=fides_optimizer,
+)
+
 # sample.sample(problem_full_multi_tau, n_samples=N_SAMPLES, result=result_full_multi_tau)
-store.write_result(
-    result_full_multi_tau, 
-    f'Application_Bruno/data/result_full_multi_tau.hdf5', 
-    overwrite=True
-    )
+"""
+
+for i in range(13): 
+    print(f"Paramater {i}")
+    # print(f"Min: {10**np.min(result_wrong_tp.sample_result.trace_x[0, :, i])}")
+    print(f"theta_opt: {10**result_full_multi_tau.optimize_result[0].x[i]}")
+    print(f"theta_pub: {importer.petab_problem.parameter_df['nominalValue'].values[i]}")
+    # print(f"Max: {10**np.max(result_wrong_tp.sample_result.trace_x[0, :, i])}")
+
+    print("---------------")
+
+
+print(f"{len(petab_models) - len(models_to_run) + 1}/{len(petab_models)} models analyzed.")
+
+
+result_file_name = f"{result_folder}/{model_to_run}.hdf5"
+store.write_result(result_full_multi_tau, result_file_name, overwrite=True)
+
+

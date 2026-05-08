@@ -12,6 +12,42 @@ outcmaes/
 **.hf5
 **.hdf5
 
+# local stuff
+pypesto_dev
+legacy
+Figures Paper
+.idea
+.venv
+Final Thesis Vanessa.pdf
+amici_models.zip
+
+# Application bruno: Ignore simulation & results folders...
+Application_Bruno/amici
+Application_Bruno/data
+Application_Bruno/figures
+Application_Bruno/simulations/__pycache__
+Application_Bruno/simulations/amici_models
+Application_Bruno/simulations/results
+Application_Bruno/simulations/sbml_models
+Application_Bruno/simulations/PEtab_versions_backup
+
+# ignore all Application_didactic files, that should stay local
+Application_didactic/amici_models
+Application_didactic/ode_sbml/amici_files
+Application_didactic/results
+Application_didactic/results_42
+Application_didactic/ters.ipynb
+
+
+# Ignore all results etx. in Application_ConversionReaction
+Application_ConversionReaction/amici_models
+Application_ConversionReaction/ode_sbml
+Application_ConversionReaction/res_*/
+Application_ConversionReaction/figure.pdf
+ode_sbml/
+
+
+
 ### JupyterNotebooks ###
 # gitignore template for Jupyter Notebooks
 # website: http://jupyter.org/
