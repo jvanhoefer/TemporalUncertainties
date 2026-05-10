@@ -16,9 +16,4 @@ def truncated_gaussian_log_correction(sigma_tau, lower_bound=0):
     log_correction = -np.log(1 - cdf_lower)
     
     return log_correction
-
-def dd_theta_truncated_gaussian_log_correction(sigma_tau, lower_bound=0):
-    """
-    Derivatice of the log correction w-r-t sigma tau
-    """
     
