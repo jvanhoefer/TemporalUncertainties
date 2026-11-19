@@ -29,6 +29,174 @@ import pypesto.optimize as optimize
 import pypesto.sample as sample
 import pypesto.store as store
 
+from pathlib import Path
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+APP_DIR = REPO_ROOT / "Application_ConversionReaction"
+
+# Full historical sweep (used only when PETAB_INDEX/SLURM_ARRAY_TASK_ID
+# selects into it by position -- see below). Generated from this file's
+# own previously-commented `setups` entries; do not hand-edit, regenerate
+# via the extraction command in the plan if entries are ever added/removed.
+ALL_SETUPS = [
+    {"n_experiment": 4, "n_time": 5, "random_seed": 42},
+    {"n_experiment": 5, "n_time": 6, "random_seed": 42},
+    {"n_experiment": 6, "n_time": 7, "random_seed": 42},
+    {"n_experiment": 7, "n_time": 8, "random_seed": 42},
+    {"n_experiment": 8, "n_time": 9, "random_seed": 42},
+    {"n_experiment": 9, "n_time": 10, "random_seed": 42},
+    {"n_experiment": 10, "n_time": 11, "random_seed": 42},
+    {"n_experiment": 11, "n_time": 12, "random_seed": 42},
+    {"n_experiment": 12, "n_time": 13, "random_seed": 42},
+    {"n_experiment": 13, "n_time": 14, "random_seed": 42},
+    {"n_experiment": 15, "n_time": 16, "random_seed": 42},
+    {"n_experiment": 16, "n_time": 17, "random_seed": 42},
+    {"n_experiment": 17, "n_time": 18, "random_seed": 42},
+    {"n_experiment": 18, "n_time": 19, "random_seed": 42},
+    {"n_experiment": 19, "n_time": 20, "random_seed": 42},
+    {"n_experiment": 20, "n_time": 25, "random_seed": 42},
+    {"n_experiment": 21, "n_time": 30, "random_seed": 42},
+    {"n_experiment": 22, "n_time": 35, "random_seed": 42},
+    {"n_experiment": 23, "n_time": 40, "random_seed": 42},
+    {"n_experiment": 24, "n_time": 45, "random_seed": 42},
+    {"n_experiment": 25, "n_time": 50, "random_seed": 42},
+    {"n_experiment": 26, "n_time": 5, "random_seed": 1},
+    {"n_experiment": 27, "n_time": 6, "random_seed": 1},
+    {"n_experiment": 28, "n_time": 7, "random_seed": 1},
+    {"n_experiment": 29, "n_time": 8, "random_seed": 1},
+    {"n_experiment": 30, "n_time": 9, "random_seed": 1},
+    {"n_experiment": 31, "n_time": 10, "random_seed": 1},
+    {"n_experiment": 32, "n_time": 12, "random_seed": 1},
+    {"n_experiment": 33, "n_time": 14, "random_seed": 1},
+    {"n_experiment": 34, "n_time": 16, "random_seed": 1},
+    {"n_experiment": 35, "n_time": 18, "random_seed": 1},
+    {"n_experiment": 36, "n_time": 20, "random_seed": 1},
+    {"n_experiment": 37, "n_time": 30, "random_seed": 1},
+    {"n_experiment": 38, "n_time": 40, "random_seed": 1},
+    {"n_experiment": 39, "n_time": 50, "random_seed": 1},
+    {"n_experiment": 40, "n_time": 5, "random_seed": 7},
+    {"n_experiment": 41, "n_time": 6, "random_seed": 7},
+    {"n_experiment": 42, "n_time": 7, "random_seed": 7},
+    {"n_experiment": 43, "n_time": 8, "random_seed": 7},
+    {"n_experiment": 44, "n_time": 9, "random_seed": 7},
+    {"n_experiment": 45, "n_time": 10, "random_seed": 7},
+    {"n_experiment": 46, "n_time": 12, "random_seed": 7},
+    {"n_experiment": 47, "n_time": 14, "random_seed": 7},
+    {"n_experiment": 48, "n_time": 16, "random_seed": 7},
+    {"n_experiment": 49, "n_time": 18, "random_seed": 7},
+    {"n_experiment": 50, "n_time": 20, "random_seed": 7},
+    {"n_experiment": 51, "n_time": 30, "random_seed": 7},
+    {"n_experiment": 52, "n_time": 40, "random_seed": 7},
+    {"n_experiment": 53, "n_time": 50, "random_seed": 7},
+    {"n_experiment": 54, "n_time": 5, "random_seed": 2},
+    {"n_experiment": 55, "n_time": 6, "random_seed": 2},
+    {"n_experiment": 56, "n_time": 7, "random_seed": 2},
+    {"n_experiment": 57, "n_time": 8, "random_seed": 2},
+    {"n_experiment": 58, "n_time": 9, "random_seed": 2},
+    {"n_experiment": 59, "n_time": 10, "random_seed": 2},
+    {"n_experiment": 60, "n_time": 12, "random_seed": 2},
+    {"n_experiment": 61, "n_time": 14, "random_seed": 2},
+    {"n_experiment": 62, "n_time": 16, "random_seed": 2},
+    {"n_experiment": 63, "n_time": 18, "random_seed": 2},
+    {"n_experiment": 64, "n_time": 20, "random_seed": 2},
+    {"n_experiment": 65, "n_time": 30, "random_seed": 2},
+    {"n_experiment": 66, "n_time": 40, "random_seed": 2},
+    {"n_experiment": 67, "n_time": 50, "random_seed": 2},
+    {"n_experiment": 68, "n_time": 5, "random_seed": 3},
+    {"n_experiment": 69, "n_time": 6, "random_seed": 3},
+    {"n_experiment": 70, "n_time": 7, "random_seed": 3},
+    {"n_experiment": 71, "n_time": 8, "random_seed": 3},
+    {"n_experiment": 72, "n_time": 9, "random_seed": 3},
+    {"n_experiment": 73, "n_time": 10, "random_seed": 3},
+    {"n_experiment": 74, "n_time": 12, "random_seed": 3},
+    {"n_experiment": 75, "n_time": 14, "random_seed": 3},
+    {"n_experiment": 76, "n_time": 16, "random_seed": 3},
+    {"n_experiment": 77, "n_time": 18, "random_seed": 3},
+    {"n_experiment": 78, "n_time": 20, "random_seed": 3},
+    {"n_experiment": 79, "n_time": 30, "random_seed": 3},
+    {"n_experiment": 80, "n_time": 40, "random_seed": 3},
+    {"n_experiment": 81, "n_time": 50, "random_seed": 3},
+    {"n_experiment": 82, "n_time": 5, "random_seed": 4},
+    {"n_experiment": 83, "n_time": 6, "random_seed": 4},
+    {"n_experiment": 84, "n_time": 7, "random_seed": 4},
+    {"n_experiment": 85, "n_time": 8, "random_seed": 4},
+    {"n_experiment": 86, "n_time": 9, "random_seed": 4},
+    {"n_experiment": 87, "n_time": 10, "random_seed": 4},
+    {"n_experiment": 88, "n_time": 12, "random_seed": 4},
+    {"n_experiment": 89, "n_time": 14, "random_seed": 4},
+    {"n_experiment": 90, "n_time": 16, "random_seed": 4},
+    {"n_experiment": 91, "n_time": 18, "random_seed": 4},
+    {"n_experiment": 92, "n_time": 20, "random_seed": 4},
+    {"n_experiment": 93, "n_time": 30, "random_seed": 4},
+    {"n_experiment": 94, "n_time": 40, "random_seed": 4},
+    {"n_experiment": 95, "n_time": 50, "random_seed": 4},
+    {"n_experiment": 96, "n_time": 5, "random_seed": 5},
+    {"n_experiment": 97, "n_time": 6, "random_seed": 5},
+    {"n_experiment": 98, "n_time": 7, "random_seed": 5},
+    {"n_experiment": 99, "n_time": 8, "random_seed": 5},
+    {"n_experiment": 100, "n_time": 9, "random_seed": 5},
+    {"n_experiment": 101, "n_time": 10, "random_seed": 5},
+    {"n_experiment": 102, "n_time": 12, "random_seed": 5},
+    {"n_experiment": 103, "n_time": 14, "random_seed": 5},
+    {"n_experiment": 104, "n_time": 16, "random_seed": 5},
+    {"n_experiment": 105, "n_time": 18, "random_seed": 5},
+    {"n_experiment": 106, "n_time": 20, "random_seed": 5},
+    {"n_experiment": 107, "n_time": 30, "random_seed": 5},
+    {"n_experiment": 108, "n_time": 40, "random_seed": 5},
+    {"n_experiment": 109, "n_time": 50, "random_seed": 5},
+    {"n_experiment": 110, "n_time": 5, "random_seed": 6},
+    {"n_experiment": 111, "n_time": 6, "random_seed": 6},
+    {"n_experiment": 112, "n_time": 7, "random_seed": 6},
+    {"n_experiment": 113, "n_time": 8, "random_seed": 6},
+    {"n_experiment": 114, "n_time": 9, "random_seed": 6},
+    {"n_experiment": 115, "n_time": 10, "random_seed": 6},
+    {"n_experiment": 116, "n_time": 12, "random_seed": 6},
+    {"n_experiment": 117, "n_time": 14, "random_seed": 6},
+    {"n_experiment": 118, "n_time": 16, "random_seed": 6},
+    {"n_experiment": 119, "n_time": 18, "random_seed": 6},
+    {"n_experiment": 120, "n_time": 20, "random_seed": 6},
+    {"n_experiment": 121, "n_time": 30, "random_seed": 6},
+    {"n_experiment": 122, "n_time": 40, "random_seed": 6},
+    {"n_experiment": 123, "n_time": 50, "random_seed": 6},
+    {"n_experiment": 124, "n_time": 5, "random_seed": 8},
+    {"n_experiment": 125, "n_time": 6, "random_seed": 8},
+    {"n_experiment": 126, "n_time": 7, "random_seed": 8},
+    {"n_experiment": 127, "n_time": 8, "random_seed": 8},
+    {"n_experiment": 128, "n_time": 9, "random_seed": 8},
+    {"n_experiment": 129, "n_time": 10, "random_seed": 8},
+    {"n_experiment": 130, "n_time": 12, "random_seed": 8},
+    {"n_experiment": 131, "n_time": 14, "random_seed": 8},
+    {"n_experiment": 132, "n_time": 16, "random_seed": 8},
+    {"n_experiment": 133, "n_time": 18, "random_seed": 8},
+    {"n_experiment": 134, "n_time": 20, "random_seed": 8},
+    {"n_experiment": 135, "n_time": 30, "random_seed": 8},
+    {"n_experiment": 136, "n_time": 40, "random_seed": 8},
+    {"n_experiment": 137, "n_time": 50, "random_seed": 8},
+    {"n_experiment": 138, "n_time": 5, "random_seed": 9},
+    {"n_experiment": 139, "n_time": 6, "random_seed": 9},
+    {"n_experiment": 140, "n_time": 7, "random_seed": 9},
+    {"n_experiment": 141, "n_time": 8, "random_seed": 9},
+    {"n_experiment": 142, "n_time": 9, "random_seed": 9},
+    {"n_experiment": 143, "n_time": 10, "random_seed": 9},
+    {"n_experiment": 144, "n_time": 12, "random_seed": 9},
+    {"n_experiment": 145, "n_time": 14, "random_seed": 9},
+    {"n_experiment": 146, "n_time": 16, "random_seed": 9},
+    {"n_experiment": 147, "n_time": 18, "random_seed": 9},
+    {"n_experiment": 148, "n_time": 20, "random_seed": 9},
+    {"n_experiment": 149, "n_time": 30, "random_seed": 9},
+    {"n_experiment": 150, "n_time": 40, "random_seed": 9},
+    {"n_experiment": 151, "n_time": 50, "random_seed": 9},
+    {"n_experiment": 152, "n_time": 15, "random_seed": 1},
+    {"n_experiment": 153, "n_time": 15, "random_seed": 2},
+    {"n_experiment": 154, "n_time": 15, "random_seed": 3},
+    {"n_experiment": 155, "n_time": 15, "random_seed": 4},
+    {"n_experiment": 156, "n_time": 15, "random_seed": 5},
+    {"n_experiment": 157, "n_time": 15, "random_seed": 6},
+    {"n_experiment": 158, "n_time": 15, "random_seed": 7},
+    {"n_experiment": 159, "n_time": 15, "random_seed": 8},
+    {"n_experiment": 160, "n_time": 15, "random_seed": 9},
+]
+
 setups = [
     # START WITH RANDOM_SEED = 42
     # {"n_experiment": 4, "n_time": 5, "random_seed": 42}, 
@@ -201,8 +369,84 @@ setups = [
 GENERATE_FIGURE_3B = False
 
 """
+util function:
+    - Generate sbml from yaml
+    - generate AMICI model from SBML
+    - do a function, that sets all the parameters from theta
+    - do a function, that does the amici simulations for given ts
+
+Hoisted out of the per-setup loop below: the base model's SBML/ODEs are
+identical across setups, and AMICI's staleness guard is mtime-based, not
+content-based -- recompiling the SAME SBML under the SAME model name on a
+second loop iteration still raises "the file was modified on disk" (see
+tests/verify_amici_model_naming.py::check_shared_name_crashes_even_with_identical_sbml).
+Compiling once here and reusing the resulting `amici_model_base` instance
+across setups is safe because `simulate_amici_base` re-sets all parameters
+and timepoints on every call via `_set_parameter_base`, so no per-setup
+state leaks between iterations.
+"""
+# generate the SBML for the base model (i.e. without temporal uncertainty) --
+# only if it isn't already compiled. The base model's content never depends
+# on `setup` (only parameter VALUES like THETA_TRUE/N_TIME/N_EXPERIMENT are
+# set per setup below, after this compile), so every concurrent array task
+# can safely compile once (first-caller-wins, see submit_slurm_array.sh's
+# prep step) and reuse the same compiled module read-only, instead of every
+# task racing to (re)write the same SBML file and compiled model directory.
+yaml_dir = str(APP_DIR / "models" / "conversion_reaction_base.yaml")
+sbml_dir = str(APP_DIR / "models" / "conversion_reaction_base.xml")
+
+model_name_base = "Conversion_Reaction_Base"
+amici_model_dir = str(APP_DIR / "ode_sbml" / "amici_files")
+
+# AMICI's compiled package ends up at amici_model_dir/model_name_base/__init__.py
+# (see amici.import_model_module below), not directly in amici_model_dir -- the
+# previous check here (Path(amici_model_dir) / "__init__.py") looked in the wrong
+# place and was therefore always False, so every process (prep job AND every
+# concurrent array task) unconditionally recompiled the base model, racing on
+# amici's DEExporter._prepare_model_folder(), which blindly os.remove()s every
+# file in amici_model_dir -- symptom: "FileNotFoundError: ... dJydsigma.cpp"
+# when a sibling process's compile already deleted it.
+if not (Path(amici_model_dir) / model_name_base / "__init__.py").exists():
+    yaml2sbml.yaml2sbml(yaml_dir, sbml_dir)
+    amici_importer = amici.SbmlImporter(sbml_dir)
+    amici_importer.sbml2amici(model_name_base, amici_model_dir)
+
+# COMPILE_ONLY lets a short prep job compile the base model and exit,
+# without running any (multi-hour) setup -- see submit_slurm_array.sh's
+# prep stage, which depends the array job on this exiting 0 quickly rather
+# than on a full setup finishing within the prep job's time limit.
+if os.environ.get("COMPILE_ONLY"):
+    print("COMPILE_ONLY set: base model compiled, exiting without running any setup.")
+    sys.exit(0)
+
+amici_module = amici.import_model_module(model_name_base, amici_model_dir)
+amici_model_base = amici_module.getModel()
+
+"""
 Define the Measurement Setup:
 """
+"""
+Select which setup this process runs.
+
+PETAB_INDEX < 0 (the default): reproduce today's exact behavior -- iterate
+`setups` as manually uncommented above (today, just the one active
+n_experiment=160 entry), sequentially, in this one process.
+
+PETAB_INDEX >= 0 (set via SLURM_ARRAY_TASK_ID or the PETAB_INDEX env var):
+claim ALL_SETUPS[PETAB_INDEX] by position, and exit immediately if that
+setup's result already exists -- this is what makes concurrent SLURM array
+tasks safe.
+"""
+PETAB_INDEX = int(os.environ.get("SLURM_ARRAY_TASK_ID", os.environ.get("PETAB_INDEX", "-1")))
+
+if PETAB_INDEX >= 0:
+    setup = ALL_SETUPS[PETAB_INDEX]
+    _result_check_path = APP_DIR / f"res_{setup['n_experiment']}" / "result_marginalized.hdf5"
+    if _result_check_path.exists():
+        print(f"Result for n_experiment={setup['n_experiment']} (index {PETAB_INDEX}) already exists, skipping.")
+        sys.exit(0)
+    setups = [setup]
+
 for setup in setups:
     # theta lin is defined in Log10 space
     THETA_TRUE = np.array([0.5, 0, 1, 1], dtype=float)
@@ -228,30 +472,7 @@ for setup in setups:
     # RANDOM_SEED = 7
     # RANDOM_SEED = 2
     RANDOM_SEED = setup.get("random_seed")
-    STORAGE_DIR_BASE = f"/Users/jakobvanhoefer/Documents/PhD/Projects/Temporal Uncertainties/Application_ConversionReaction/res_{N_EXPERIMENT}"
-
-    """
-    util function:
-        - Generate sbml from yaml
-        - generate AMICI model from SBML
-        - do a function, that sets all the parameters from theta
-        - do a function, that does the amici simulations for given ts
-    """
-    # generate the SBML for the base model (i.e. without temporal uncertainty)
-    yaml_dir = "/Users/jakobvanhoefer/Documents/PhD/Projects/Temporal Uncertainties/Application_ConversionReaction/models/conversion_reaction_base.yaml"
-    sbml_dir = "/Users/jakobvanhoefer/Documents/PhD/Projects/Temporal Uncertainties/Application_ConversionReaction/models/conversion_reaction_base.xml"
-
-    yaml2sbml.yaml2sbml(yaml_dir,sbml_dir)
-
-    # generate the AMICI model
-    model_name_base = "Conversion_Reaction_Base"
-    amici_model_dir = 'ode_sbml/amici_files'
-
-    amici_importer = amici.SbmlImporter(sbml_dir)
-    amici_importer.sbml2amici(model_name_base, amici_model_dir)
-
-    amici_module = amici.import_model_module(model_name_base, amici_model_dir)
-    amici_model_base = amici_module.getModel()
+    STORAGE_DIR_BASE = str(APP_DIR / f"res_{N_EXPERIMENT}")
 
     def _set_parameter_base(amici_model, theta_log: np.array):
         """
@@ -330,8 +551,8 @@ for setup in setups:
     X_DATA = X_DATA + np.random.normal(
             loc=0.0, scale=SIGMA_X, size=X_DATA.shape)
 
-    # make directory. make sure, it does not exist yet!
-    os.makedirs(STORAGE_DIR_BASE, exist_ok=False)
+    # make directory (may already exist from a previous run of this setup)
+    os.makedirs(STORAGE_DIR_BASE, exist_ok=True)
 
     # save t_true and x_data as .csv
     np.savetxt(f'{STORAGE_DIR_BASE}/t_true.csv', T_TRUE, delimiter=',')
@@ -453,8 +674,21 @@ for setup in setups:
 
 
     # import into amici:
-    model_name_marginal = "Conversion_Reaction_marginal"
-    amici_model_dir = 'ode_sbml/amici_files'
+    # N_EXPERIMENT is this file's existing unique-per-setup key (also used
+    # for STORAGE_DIR_BASE) -- each setup's marginal model has different
+    # ODEs (T_WRONG/X_DATA baked into z_dot above), so it needs its own
+    # compiled AMICI module name or the next setup's import crashes with
+    # "the file was modified on disk" (see tests/verify_amici_model_naming.py).
+    # It also needs its own build DIRECTORY, not just its own name: AMICI's
+    # sbml2amici() treats amici_model_dir as a shared project root (its
+    # CMakeLists.txt/setup.py and the cmake/ninja build_model_ext staging
+    # dir are not namespaced per model), so concurrent SLURM array tasks
+    # compiling different setups into the same directory race on those
+    # shared files -- symptom: "ninja: error: failed recompaction: No such
+    # file or directory".
+    model_name_marginal = f"Conversion_Reaction_marginal_{N_EXPERIMENT}"
+    amici_model_dir = str(APP_DIR / "ode_sbml" / "amici_files" / f"marginal_{N_EXPERIMENT}")
+    os.makedirs(amici_model_dir, exist_ok=True)
 
     amici_importer_marginal = amici.SbmlImporter(sbml_dir_marginnalized)
     amici_importer_marginal.sbml2amici(model_name_marginal, amici_model_dir)
@@ -510,7 +744,7 @@ for setup in setups:
                 grad -= szim_sim[-1, :, i] / z_i
 
                 if len(OBS) == 1:
-                    res += X_DATA.size * np.log(2*np.pi*SIGMA_X * SIGMA_TAU)
+                    res += np.log(2*np.pi*SIGMA_X * SIGMA_TAU)
                 else:
                     raise NotImplementedError("Here there is some more work")
 

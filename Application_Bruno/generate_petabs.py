@@ -46,7 +46,10 @@ import numpy as np
 import os
 import shutil
 import pandas as pd
+from pathlib import Path
 
+REPO_ROOT = Path(__file__).resolve().parents[1]
+APP_DIR = REPO_ROOT / "Application_Bruno"
 
 # SIGMA_TAUS = [0.5, 1, 2, 3, 4, 5, 10, 15, 20]
 SIGMA_TAUS = [0, 1, 3, 5, 7, 9, 11, 13, 15]
@@ -61,14 +64,16 @@ SHARED_TIMEPOINTS = False
 # and only the time points will be perturbed
 SYNTHETIC_DATA = False
 
-REPLICATE_ID = 19
-RANDOM_SEED = 19
+# Replicate r of the paper was generated with REPLICATE_ID = RANDOM_SEED = r,
+# r = 1, ..., 19 (run once per r, e.g. `REPLICATE_ID=3 python generate_petabs.py`).
+REPLICATE_ID = int(os.environ.get("REPLICATE_ID", "1"))
+RANDOM_SEED = REPLICATE_ID
 
 np.random.seed(RANDOM_SEED)
 # generate the folders:
-ORIGINAL_PETAB_DIR = "/Users/jakobvanhoefer/Documents/PhD/Projects/Temporal Uncertainties/Application_Bruno/petab_bruno_original"
+ORIGINAL_PETAB_DIR = str(APP_DIR / "petab_bruno_original")
 
-PETAB_FOLDER_BASE = "/Users/jakobvanhoefer/Documents/PhD/Projects/Temporal Uncertainties/Application_Bruno/simulations/PEtab_versions"
+PETAB_FOLDER_BASE = str(APP_DIR / "simulations" / "PEtab_versions")
 os.makedirs(PETAB_FOLDER_BASE, exist_ok=True)
 os.makedirs(f"{PETAB_FOLDER_BASE}/sigma_tau_0_0", exist_ok=True)
 
@@ -96,7 +101,7 @@ def generate_timepoints_with_perturbation(
     if shared_timepoints:
         # read in tsv file with time point information
         time_points_df = pd.read_csv(
-            "/Users/jakobvanhoefer/Documents/PhD/Projects/Temporal Uncertainties/Application_Bruno/simulations/shared_parametrization_df.tsv", 
+            str(APP_DIR / "simulations" / "shared_parametrization_df.tsv"),
             sep="\t"
             )
         delta_tau_reduced = np.random.normal(loc=0, scale=sigma_tau, size=(42, ))

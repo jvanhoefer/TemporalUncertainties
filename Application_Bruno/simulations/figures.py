@@ -1,17 +1,24 @@
 """
 Create Figure No. 5 - Bruno application.
 """
+import os
+import re
 import pypesto
 import pypesto.store as store
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
+from pathlib import Path
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
+APP_DIR = REPO_ROOT / "Application_Bruno"
 
 rows = []
 
 
 
-RESULT_DIR = "/Users/jakobvanhoefer/Documents/PhD/Projects/Temporal Uncertainties/Application_Bruno/simulations/results"
+RESULT_DIR = str(APP_DIR / "simulations" / "results")
+CSV_PATH = os.path.join(RESULT_DIR, "nll_summary.csv")
 SIGMA_TAU = 0.0
 N_DATA = 77
 N_PARAMETERS_WRONG_TP = 13
@@ -34,19 +41,7 @@ FONT_SIZE_TITLE = 26 # 20
 
 LINE_WIDTH = 3
 CAP_SIZE   = 6
-CAP_THICK  = LINE_WIDTH 
-
-"""
-Extend an existing nll_summary.csv with any missing file x folder combinations.
-"""
-import os
-import re
-import numpy as np
-import pandas as pd
-import pypesto.store as store
-
-RESULT_DIR = "/Users/jakobvanhoefer/Documents/PhD/Projects/Temporal Uncertainties/Application_Bruno/simulations/results"
-CSV_PATH = os.path.join(RESULT_DIR, "nll_summary.csv")
+CAP_THICK  = LINE_WIDTH
 
 FOLDERS = [
     "marginalized_multi_tau",

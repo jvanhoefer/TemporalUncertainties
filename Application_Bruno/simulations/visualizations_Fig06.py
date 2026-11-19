@@ -6,11 +6,17 @@ import pypesto.store as store
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
+import os
+from pathlib import Path
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
+APP_DIR = REPO_ROOT / "Application_Bruno"
 
 rows = []
 
-RESULT_DIR = "/Users/jakobvanhoefer/Documents/PhD/Projects/Temporal Uncertainties/Application_Bruno/simulations/results"
-FIGURE_STORE_DIR = "/Users/jakobvanhoefer/Documents/PhD/Projects/Temporal Uncertainties/Figures Paper/building_blocks"
+RESULT_DIR = str(APP_DIR / "simulations" / "results")
+FIGURE_STORE_DIR = str(REPO_ROOT / "Figures Paper" / "building_blocks")
+os.makedirs(FIGURE_STORE_DIR, exist_ok=True)
 SIGMA_TAU = 0.0
 N_DATA = 77
 N_PARAMETERS_WRONG_TP = 13
@@ -45,7 +51,7 @@ import numpy as np
 import pandas as pd
 import pypesto.store as store
 
-RESULT_DIR = "/Users/jakobvanhoefer/Documents/PhD/Projects/Temporal Uncertainties/Application_Bruno/simulations/results"
+RESULT_DIR = str(APP_DIR / "simulations" / "results")
 CSV_PATH = os.path.join(RESULT_DIR, "nll_summary.csv")
 
 FOLDERS = [
@@ -203,7 +209,7 @@ print(df.to_string(index=False))
 """
 
 COLOR_ORIGINAL    = [144/255, 144/255, 133/255]  # grey
-COLOR_MARGINALIZED = [252/255, 186/255, 0]        # orange
+COLOR_MARGINALIZED = [243/255, 118/255, 40/255]   # orange
 COLOR_FULL        = [0, 78/255, 159/255]          # blue
 
 FONT_SIZE_TICKS = 18
@@ -237,7 +243,12 @@ mask = (
 )
 plot_df_synthetic_shared = df[mask].sort_values("sigma")
 
-for plot_df in [plot_df_copied_multi, plot_df_copied_shared, plot_df_synthetic_multi, plot_df_synthetic_shared]:
+# Exploratory (not saved) multi- vs shared-tau BIC plot; skipped while the
+# BIC columns above are commented out.
+_bic_plots = [plot_df_copied_multi, plot_df_copied_shared, plot_df_synthetic_multi, plot_df_synthetic_shared]
+if "BIC_marginalized_shared_tau" not in df.columns:
+    _bic_plots = []
+for plot_df in _bic_plots:
     print(10*"---")
 
     fig, ax = plt.subplots(figsize=(8, 6))
@@ -289,17 +300,18 @@ ax.plot(plot_df["sigma"], plot_df["AIC_full_multi_tau"],
         label="Full", color=COLOR_FULL,
         marker="o", linewidth=LINE_WIDTH)
 """
-ax.set_xlabel(r"$\sigma_\tau$", fontsize=FONT_SIZE_AXES)
-ax.set_ylabel("AIC", fontsize=FONT_SIZE_AXES)
-ax.set_title("AIC — copied data, multi timepoints", fontsize=FONT_SIZE_TITLE)
-ax.tick_params(labelsize=FONT_SIZE_TICKS)
-ax.spines["right"].set_visible(False)
-ax.spines["top"].set_visible(False)
-ax.legend(fontsize=FONT_SIZE_TICKS)
-# ax.set_ylim((-1, None))
-ax.set_xlim((0, 16))
-plt.tight_layout()
-plt.show()
+if _bic_plots:
+    ax.set_xlabel(r"$\sigma_\tau$", fontsize=FONT_SIZE_AXES)
+    ax.set_ylabel("AIC", fontsize=FONT_SIZE_AXES)
+    ax.set_title("AIC — copied data, multi timepoints", fontsize=FONT_SIZE_TITLE)
+    ax.tick_params(labelsize=FONT_SIZE_TICKS)
+    ax.spines["right"].set_visible(False)
+    ax.spines["top"].set_visible(False)
+    ax.legend(fontsize=FONT_SIZE_TICKS)
+    # ax.set_ylim((-1, None))
+    ax.set_xlim((0, 16))
+    plt.tight_layout()
+    plt.show()
 
 """
 FUTURE FIGURE 6A: Plot the l2 distance for the best parameter fit vs. the original parameters

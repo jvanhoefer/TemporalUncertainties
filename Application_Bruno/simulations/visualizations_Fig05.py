@@ -10,9 +10,15 @@ import pandas as pd
 import numpy as np
 import amici
 from scipy.stats import chi2
+import os
+from pathlib import Path
 
-RESULTS_DIR = "/Users/jakobvanhoefer/Documents/PhD/Projects/Temporal Uncertainties/Application_Bruno/simulations/results"
-FIGURE_STORE_DIR = "/Users/jakobvanhoefer/Documents/PhD/Projects/Temporal Uncertainties/Figures Paper/building_blocks"
+REPO_ROOT = Path(__file__).resolve().parents[2]
+APP_DIR = REPO_ROOT / "Application_Bruno"
+
+RESULTS_DIR = str(APP_DIR / "simulations" / "results")
+FIGURE_STORE_DIR = str(REPO_ROOT / "Figures Paper" / "building_blocks")
+os.makedirs(FIGURE_STORE_DIR, exist_ok=True)
 
 
 COLOR_STANDARD     = [144/255, 144/255, 133/255, 1]  # grey
@@ -54,8 +60,8 @@ def get_multi_tau_sigma_from_theta(
 
 
 # read in tsv data for the reference point
-parameter_df = pd.read_csv("/Users/jakobvanhoefer/Documents/PhD/Projects/Temporal Uncertainties/Application_Bruno/simulations/PEtab_versions_backup/sigma_tau_0_0/parameters_Bruno_JExpBot2016.tsv", sep="\t")
-measurement_df = pd.read_csv("/Users/jakobvanhoefer/Documents/PhD/Projects/Temporal Uncertainties/Application_Bruno/simulations/PEtab_versions_backup/sigma_tau_0_0/measurementData_Bruno_JExpBot2016.tsv", sep="\t")
+parameter_df = pd.read_csv(str(APP_DIR / "simulations" / "PEtab_versions" / "sigma_tau_0_0" / "parameters_Bruno_JExpBot2016.tsv"), sep="\t")
+measurement_df = pd.read_csv(str(APP_DIR / "simulations" / "PEtab_versions" / "sigma_tau_0_0" / "measurementData_Bruno_JExpBot2016.tsv"), sep="\t")
 
 reference_point = visualize.ReferencePoint(
     x=np.log10(parameter_df["nominalValue"].values),
@@ -236,26 +242,24 @@ from copy import deepcopy
 from typing import List
 
 COLOR_STANDARD     = [144/255, 144/255, 133/255, 1]  # grey
-COLOR_MARGINALIZED = [252/255, 186/255, 0, 1]        # orange
+COLOR_MARGINALIZED = [243/255, 118/255, 40/255, 1]  # orange
 COLOR_JOINT        = [0, 78/255, 159/255, 1]          # blue
 LINE_WIDTH = 3
 
 
 
-import os
-
 model_name = "ModelFullMultiTau"
-model_dir = "/Users/jakobvanhoefer/Documents/PhD/Projects/Temporal Uncertainties/Application_Bruno/amici"
+model_dir = str(APP_DIR / "amici")
 
 # Only compile if not already compiled
 if not os.path.exists(os.path.join(model_dir, model_name)):
-    sbml_importer = amici.SbmlImporter("/Users/jakobvanhoefer/Documents/PhD/Projects/Temporal Uncertainties/Application_Bruno/petab_bruno_original/model_Bruno_JExpBot2016.xml")
+    sbml_importer = amici.SbmlImporter(str(APP_DIR / "petab_bruno_original" / "model_Bruno_JExpBot2016.xml"))
     sbml_importer.sbml2amici(model_name, model_dir)
 
 model_module = amici.import_model_module(model_name, model_dir)
 amici_model = model_module.getModel()
 
-importer = PetabImporter.from_yaml("/Users/jakobvanhoefer/Documents/PhD/Projects/Temporal Uncertainties/Application_Bruno/petab_bruno_original/Bruno_JExpBot2016.yaml")
+importer = PetabImporter.from_yaml(str(APP_DIR / "petab_bruno_original" / "Bruno_JExpBot2016.yaml"))
 problem_wrong_tp = importer.create_problem(verbose=False)
 
 
@@ -275,7 +279,7 @@ condition_df_keys = condition_df.keys()
 PARAMETER_IDS = importer.petab_problem.get_x_ids()
 
 tau_df = pd.read_csv(
-        "/Users/jakobvanhoefer/Documents/PhD/Projects/Temporal Uncertainties/Application_Bruno/simulations/full_parametrization_df.tsv", 
+        str(APP_DIR / "simulations" / "full_parametrization_df.tsv"),
         sep="\t"
         ).reset_index()
 
@@ -801,36 +805,3 @@ assemble_figure(
     amici_model=amici_model,
     save_path=f"{FIGURE_STORE_DIR}/figure_5_d.{DATAFORMAT}",
 )
-
-
-"""
-Now, let's actually plot some trajectories
-"""
-RESULTS_DIR = "/Users/jakobvanhoefer/Documents/PhD/Projects/Temporal Uncertainties/Application_Bruno/simulations/results"
-result_wrong_tp = store.read_result(f"{RESULTS_DIR}/wrong_tp/sigma_tau_0_0.hdf5")
-result_full_multi_tau = store.read_result(f"{RESULTS_DIR}/full_multi_tau/sigma_tau_0_0.hdf5")
-result_marginalized_multi_tau = store.read_result(f"{RESULTS_DIR}/marginalized_multi_tau/sigma_tau_0_0.hdf5")
-
-theta_theta_wrong_tp = result_wrong_tp.optimize_result.x[0]
-theta_full_multi_tau = result_full_multi_tau.optimize_result.x[0]
-theta_marginalized_multi_tau = result_marginalized_multi_tau.optimize_result.x[0]
-thetas = [theta_theta_wrong_tp, theta_full_multi_tau, theta_marginalized_multi_tau]
-
-save_dir = "/Users/jakobvanhoefer/Documents/PhD/Projects/Temporal Uncertainties/Application_Bruno/figures"
-
-for condition in ["model1_data1", "model1_data2", "model1_data3", "model1_data4", "model1_data5", "model1_data6"]:
-    visualize_for_condition(condition=condition, amici_model=amici_model, thetas=thetas, save_in_dir=save_dir)
-
-save_legend_figure(thetas=thetas, save_in_dir=save_dir)
-
-
-
-for sigma_tau in [str(i) for i in range(1, 16, 2)]:
-    result_wrong_tp = store.read_result(f"{RESULTS_DIR}/wrong_tp/synthetic_data_multi_timepoints_sigma_tau_{sigma_tau}.hdf5", optimize=True)
-    result_full_multi_tau = store.read_result(f"{RESULTS_DIR}/full_multi_tau/synthetic_data_multi_timepoints_sigma_tau_{sigma_tau}.hdf5", optimize=True)
-    result_marginalized_multi_tau = store.read_result(f"{RESULTS_DIR}/marginalized_multi_tau/synthetic_data_multi_timepoints_sigma_tau_{sigma_tau}.hdf5", optimize=True)
-
-    print("--------------------------------")
-    print(np.sum(np.abs(result_full_multi_tau.optimize_result.x[0][13:90] -  measurement_df["time"].values)))
-    print(np.linalg.norm(result_wrong_tp.optimize_result.x[0][:13]-reference_point.x, ord=float("inf")))    
-    print(np.linalg.norm(result_marginalized_multi_tau.optimize_result.x[0][:13]-reference_point.x, ord=float("inf")))

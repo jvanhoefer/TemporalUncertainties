@@ -16,12 +16,16 @@ import pandas as pd
 import pypesto
 import petab
 import amici
-import warnings 
+import warnings
 import numpy as np
 import os
+import sys
 from copy import deepcopy
-from scipy.stats import norm 
+from scipy.stats import norm
+from pathlib import Path
 
+REPO_ROOT = Path(__file__).resolve().parents[2]
+APP_DIR = REPO_ROOT / "Application_Bruno"
 
 """
 Set variables for the simulation/analysis e.g. for the "right" PEtab
@@ -37,26 +41,59 @@ TRUNCATED_GAUSSIAN = True
 """
 Initialize the folder, to automatically choose the "next" model
 """
-result_folder = "/Users/jakobvanhoefer/Documents/PhD/Projects/Temporal Uncertainties/Application_Bruno/simulations/results/marginalized_shared_tau"
+result_folder = str(APP_DIR / "simulations" / "results" / "marginalized_shared_tau")
 os.makedirs(result_folder, exist_ok=True)
 
 """
-Choose the "right", i.e. next in line model for which no result exists yet...
+Select which PEtab variant this process runs.
+
+PETAB_INDEX < 0 (the default): reproduce the original scan-and-pick
+behavior exactly -- pick the first variant (after sorting, and after
+filtering out copied-data variants) with no result yet. This is what
+run_all.sh's local sequential loop still uses.
+
+PETAB_INDEX >= 0 (set via SLURM_ARRAY_TASK_ID or the PETAB_INDEX env var):
+claim that exact variant by position in the full (unfiltered) PEtab
+variant listing -- matching submit_slurm_array.sh's array range, which is
+sized from the raw variant count -- and exit immediately if that variant
+is not applicable to this model (same filter as the default branch) or if
+its result already exists. This is what makes concurrent SLURM array
+tasks safe: each task claims a distinct, deterministic variant instead of
+racing to scan the same "first missing" one.
 """
-petab_dir = "/Users/jakobvanhoefer/Documents/PhD/Projects/Temporal Uncertainties/Application_Bruno/simulations/PEtab_versions"
+petab_dir = str(APP_DIR / "simulations" / "PEtab_versions")
 petab_models = sorted(f for f in os.listdir(petab_dir) if os.path.isdir(os.path.join(petab_dir, f)))
 
 exisiting_results = sorted(os.path.splitext(f)[0] for f in os.listdir(result_folder))
-# get the list of all models, for which no result exists yet:
-models_to_run = sorted([
-    model for model in petab_models 
-    if model not in exisiting_results
-    # and "copied_data_multi_timepoints" not in model
-    and "copied_data_" not in model
-])
-model_to_run = models_to_run[0]
 
-petab_yaml = f"/Users/jakobvanhoefer/Documents/PhD/Projects/Temporal Uncertainties/Application_Bruno/simulations/PEtab_versions/{model_to_run}/Bruno_JExpBot2016.yaml"
+PETAB_INDEX = int(os.environ.get("SLURM_ARRAY_TASK_ID", os.environ.get("PETAB_INDEX", "-1")))
+
+if PETAB_INDEX >= 0:
+    model_to_run = petab_models[PETAB_INDEX]
+    if "copied_data_" in model_to_run:
+        print(f"Variant {model_to_run} (index {PETAB_INDEX}) is not applicable to the shared-tau model, skipping.")
+        sys.exit(0)
+    if model_to_run in exisiting_results:
+        print(f"Result for {model_to_run} (index {PETAB_INDEX}) already exists, skipping.")
+        sys.exit(0)
+    models_to_run = [model_to_run]
+else:
+    # get the list of all models, for which no result exists yet:
+    models_to_run = sorted([
+        model for model in petab_models
+        if model not in exisiting_results
+        # and "copied_data_multi_timepoints" not in model
+        and "copied_data_" not in model
+    ])
+    if not models_to_run:
+        if not os.environ.get("COMPILE_ONLY"):
+            print("All variants already have results, nothing to run.")
+            sys.exit(0)
+        # prep job on a finished set: still compile, using the unperturbed variant
+        models_to_run = ["sigma_tau_0_0"]
+    model_to_run = models_to_run[0]
+
+petab_yaml = str(APP_DIR / "simulations" / "PEtab_versions" / model_to_run / "Bruno_JExpBot2016.yaml")
 print(f"Running model {model_to_run} with wrong time points")
 
 
@@ -70,35 +107,42 @@ else:
     SIGMA_TAU = float(sigma_tau_parts[-1])
 del sigma_tau_parts
 
-ORIGINAL_PETAB_DIR = "/Users/jakobvanhoefer/Documents/PhD/Projects/Temporal Uncertainties/Application_Bruno/petab_bruno_original"
+ORIGINAL_PETAB_DIR = str(APP_DIR / "petab_bruno_original")
 
 np.random.seed(RANDOM_SEED)
 
 
-ORIGINAL_SBML_DIR = f"/Users/jakobvanhoefer/Documents/PhD/Projects/Temporal Uncertainties/Application_Bruno/simulations/PEtab_versions/{model_to_run}/model_Bruno_JExpBot2016.xml"
+ORIGINAL_SBML_DIR = str(APP_DIR / "simulations" / "PEtab_versions" / model_to_run / "model_Bruno_JExpBot2016.xml")
 
 reader = sbml.SBMLReader()
 document = reader.readSBML(ORIGINAL_SBML_DIR)
 
 # create PEtab model, in order to get informations from there
-# petab_yaml = "/Users/jakobvanhoefer/Documents/PhD/Projects/Temporal Uncertainties/Application_Bruno/petab_bruno_original/Bruno_JExpBot2016.yaml"
 importer = petab.v1.Problem.from_yaml(petab_yaml)
 
-DELTA_TIME_BOUND = 20
+# Marginalization integration bounds: every z_k state is integrated over the
+# SAME shared window [T_0, T_MAX] (rather than a per-data-point local window),
+# matching the paper's Section 2.4 definition of a single (t0, tmax) support
+# for the latent measurement-time distribution. Measurement times in this
+# dataset range from 5 to 180, so T_MAX = 240 comfortably covers all of them.
+T_0 = 0
+T_MAX = 240
 CONDITIONS = ["model1_data1", "model1_data2", "model1_data3", "model1_data4", "model1_data5", "model1_data6"]
 
 """
 Delete all previous files, in order to e.g. recompile the AMICI model
 """
 import shutil
-# delete all amici folders with content and subfolders:
+# Delete only THIS script's own (script, variant)-scoped scratch space --
+# NOT the shared "amici"/"sbml_models" roots (a concurrent task processing
+# a different variant, or marginalized_multi_tau.py processing ANY
+# variant, would have its own compiled model/SBML wiped out from under it)
+# and NOT the "amici_models"/"ode_sbml" paths (unused by this script; they
+# are pyPESTO's/full_*.py's own compiled-model caches, shared across the
+# OTHER Bruno fitting scripts -- see Task 2's fix for those).
 amici_files = [
-    "/Users/jakobvanhoefer/Documents/PhD/Projects/Temporal Uncertainties/Application_Bruno/amici",
-    "/Users/jakobvanhoefer/Documents/PhD/Projects/Temporal Uncertainties/Application_Bruno/amici_models", 
-    "/Users/jakobvanhoefer/Documents/PhD/Projects/Temporal Uncertainties/Application_Bruno/simulations/amici_models", 
-    "/Users/jakobvanhoefer/Documents/PhD/Projects/Temporal Uncertainties/amici_models", 
-    "/Users/jakobvanhoefer/Documents/PhD/Projects/Temporal Uncertainties/Application_Bruno/simulations/ode_sbml", 
-    "/Users/jakobvanhoefer/Documents/PhD/Projects/Temporal Uncertainties/Application_Bruno/simulations/sbml_models",  
+    str(APP_DIR / "amici" / "marginalized_shared_tau" / model_to_run),
+    str(APP_DIR / "simulations" / "sbml_models" / "marginalized_shared_tau" / model_to_run),
 ]
 
 for amici_folder in amici_files:
@@ -107,7 +151,7 @@ for amici_folder in amici_files:
 
 # note: The time points are corrected below, when T_PETAB is deinfed
 tau_shared_df = pd.read_csv(
-    "/Users/jakobvanhoefer/Documents/PhD/Projects/Temporal Uncertainties/Application_Bruno/simulations/shared_parametrization_df.tsv", sep="\t")
+    str(APP_DIR / "simulations" / "shared_parametrization_df.tsv"), sep="\t")
 
 # dict, where for every condition, there is a list of tau numbers for this condition
 tau_shared_index_per_condition = (
@@ -279,7 +323,11 @@ for condition in CONDITIONS:
     )
 
     # create the directory for the SBML file
-    sbml_dir = Path(f"/Users/jakobvanhoefer/Documents/PhD/Projects/Temporal Uncertainties/Application_Bruno/simulations/sbml_models/marginalized_multi_tau/{condition}.xml")
+    # NOTE: uses its own "marginalized_shared_tau" folder (distinct from
+    # marginalized_multi_tau.py's "marginalized_multi_tau" folder) so the two
+    # scripts' generated SBML/AMICI models never collide when both are run
+    # from the same checkout.
+    sbml_dir = APP_DIR / "simulations" / "sbml_models" / "marginalized_shared_tau" / model_to_run / f"{condition}.xml"
     sbml_dir.parent.mkdir(parents=True, exist_ok=True)
 
     # save the model
@@ -292,9 +340,19 @@ amici_models = []
 for condition in CONDITIONS:
 
     # create an AMICI importer and compile/import the amici file
-    sbml_importer = amici.SbmlImporter(f"/Users/jakobvanhoefer/Documents/PhD/Projects/Temporal Uncertainties/Application_Bruno/simulations/sbml_models/marginalized_multi_tau/{condition}.xml")
-    model_name = f"Bruno_JExpBot2016_marginalized_{condition}"
-    model_dir = f"/Users/jakobvanhoefer/Documents/PhD/Projects/Temporal Uncertainties/Application_Bruno/amici/amici_{condition}"
+    sbml_importer = amici.SbmlImporter(str(APP_DIR / "simulations" / "sbml_models" / "marginalized_shared_tau" / model_to_run / f"{condition}.xml"))
+    # model_to_run is this file's existing unique-per-variant key (also used
+    # for sbml_dir above and for result_file_name) -- this model's ODEs
+    # embed model_to_run's specific perturbed measurement times, so it needs
+    # its own compiled module per (script, variant, condition) triple or a
+    # concurrent array task processing a different variant crashes AMICI's
+    # staleness guard on import (same failure mode fixed for
+    # Application_ConversionReaction). The "shared" tag also distinguishes
+    # this from marginalized_multi_tau.py's compiled models for the SAME
+    # variant/condition, whose SBML content differs (multi- vs shared-tau
+    # parameter mapping) despite sharing model_to_run/condition.
+    model_name = f"Bruno_JExpBot2016_marginalized_shared_{model_to_run}_{condition}"
+    model_dir = str(APP_DIR / "amici" / "marginalized_shared_tau" / model_to_run / f"amici_{condition}")
     sbml_importer.sbml2amici(model_name, model_dir)
     model_module = amici.import_model_module(model_name, model_dir)
     amici_model = model_module.getModel()
@@ -303,6 +361,18 @@ for condition in CONDITIONS:
     # Append the AMICI model to the list
     amici_models.append(amici_model)
     print(f"create AMICI model for condition: {condition}")
+
+# COMPILE_ONLY lets a short prep job compile this variant's per-condition
+# models and exit, without running any (multi-hour) optimization -- see
+# submit_slurm_array.sh's prep stage, which depends the array job on this
+# exiting 0 quickly rather than on a full variant finishing within the prep
+# job's time limit. Note: unlike full_multi_tau.py/full_shared_tau.py, these
+# per-condition models are NOT shared across variants (Task 3), so this
+# doesn't save recompilation for the array's other variants -- it only
+# guards against the prep job timing out and blocking --dependency=afterok.
+if os.environ.get("COMPILE_ONLY"):
+    print("COMPILE_ONLY set: models compiled, exiting without running any variant.")
+    sys.exit(0)
 
 # create an objective function, where the z's are evaluated at z(t_end) - z(t_start)...
 """
@@ -398,13 +468,9 @@ def simulate_amici_models(
     for amici_model, condition in zip(amici_models, CONDITIONS):
         # Set parameters
         amici_model = set_parameters_for_condition(condition, theta, amici_model)
-        
-        # set time points
-        ts_true = importer.measurement_df[importer.measurement_df['simulationConditionId'] == condition]['time'].to_numpy(dtype=float)
-        ts = np.concatenate([np.maximum(ts_true - DELTA_TIME_BOUND, 0.0), ts_true + DELTA_TIME_BOUND])
-        # sort and get rid of duplicates
-        ts = sorted(set(ts))
-        amici_model.setTimepoints(ts)
+
+        # every z_k shares the same global integration window [T_0, T_MAX]
+        amici_model.setTimepoints([T_0, T_MAX])
 
         # get solver and simulate
         solver = amici_model.getSolver()
@@ -450,9 +516,8 @@ def get_z_values_from_rdatas(
         z_value_dict[f"z_{i}"] = {
             "condition_id": measurement_df_i["simulationConditionId"].to_list()[0],
             "t_true": t_true,
-            # set t_start to be non-negative
-            "t_start": max(t_true - DELTA_TIME_BOUND, 0),
-            "t_end": t_true + DELTA_TIME_BOUND,
+            "t_start": T_0,
+            "t_end": T_MAX,
             "sigma_x": measurement_df_i["noiseParameters"].to_list(),
             "z_start": None,
             "z_end": None,
@@ -616,13 +681,18 @@ def neg_log_post_multi_tau_marginalized(
 
         grad_neg_log_post += -1/z * grad_z
 
-    # correct for the truncated Gaussian prior on sigma_tau, if applicable
+    # normalize the Gaussian prior on tau to the SAME window [T_0, T_MAX] the
+    # z states are integrated over (truncated normal, paper Section 2.4):
+    # -log p(tau) gains + log(Phi(b) - Phi(a)), a = (T_0-t)/sigma_tau, b = (T_MAX-t)/sigma_tau
     if TRUNCATED_GAUSSIAN:
         for z_id in z_values_dict:
-            z_value_dict = z_values_dict[z_id]
-            neg_log_post += norm.logsf(0, loc=z_value_dict["t_true"], scale=sigma_tau)
-            # add the correction for the truncated Gaussian
-            grad_neg_log_post[-1] -= norm.pdf(0, loc=z_value_dict["t_true"], scale=sigma_tau) / norm.sf(0, loc=z_value_dict["t_true"], scale=sigma_tau)
+            t_true = z_values_dict[z_id]["t_true"]
+            a = (T_0 - t_true) / sigma_tau
+            b = (T_MAX - t_true) / sigma_tau
+            prior_mass = norm.cdf(b) - norm.cdf(a)
+            neg_log_post += np.log(prior_mass)
+            # d/dsigma_tau log(Phi(b) - Phi(a)) = (a*phi(a) - b*phi(b)) / (sigma_tau * prior_mass)
+            grad_neg_log_post[-1] += (a * norm.pdf(a) - b * norm.pdf(b)) / (sigma_tau * prior_mass)
  
 
     # undo the chain rule for lag-transformed parameters for the gradient:
@@ -669,8 +739,8 @@ def _get_thread_local_models():
     if not hasattr(_thread_local, 'amici_models'):
         _thread_local.amici_models = []
         for condition in CONDITIONS:
-            model_name = f"Bruno_JExpBot2016_marginalized_{condition}"
-            model_dir = f"/Users/jakobvanhoefer/Documents/PhD/Projects/Temporal Uncertainties/Application_Bruno/amici/amici_{condition}"
+            model_name = f"Bruno_JExpBot2016_marginalized_shared_{model_to_run}_{condition}"
+            model_dir = str(APP_DIR / "amici" / "marginalized_shared_tau" / model_to_run / f"amici_{condition}")
             model_module = amici.import_model_module(model_name, model_dir)
             _thread_local.amici_models.append(model_module.getModel())
     
@@ -700,7 +770,7 @@ problem_marginalized_multi_tau = pypesto.Problem(
 
 # gradient check
 if INCLUDE_GRAD_CHECK:
-    theta_true_marginal = np.concatenate([np.log10(importer.parameter_df["nominalValue"].values), [SIGMA_TAU]])
+    theta_true_marginal = np.concatenate([np.log10(importer.parameter_df['nominalValue'].values), [SIGMA_TAU]])
     print(obj_fun_marginalized_multi_tau(theta_true_marginal))
     problem_marginalized_multi_tau.objective.check_grad(theta_true_marginal)
     # problem_marginalized_multi_tau.objective.check_grad(theta_true_marginal + np.random.randn(*theta_true_marginal.shape))
@@ -710,7 +780,12 @@ import fides
 fides_optimizer = optimize.FidesOptimizer(verbose=0, hessian_update=fides.hessian_approximation.BFGS())
 fides_optimizer.options["maxiter"]=2_500
 
-engine = MultiThreadEngine(n_threads=os.cpu_count())
+# Under SLURM, os.cpu_count() reports the NODE's total cores, not this
+# array task's allocation -- SLURM_CPUS_PER_TASK reflects what --cpus-per-task
+# actually reserved for this task. Falls back to os.cpu_count() for local runs
+# (no SLURM_CPUS_PER_TASK set).
+N_THREADS = int(os.environ.get("SLURM_CPUS_PER_TASK", os.cpu_count()))
+engine = MultiThreadEngine(n_threads=N_THREADS)
 
 # your optimizer stays the same
 result_marginalized_multi_tau = optimize.minimize(
@@ -752,11 +827,11 @@ for i in range(13):
     if INCLUDE_SAMPLING:
         print(f"Min: {10**np.min(result_marginalized_multi_tau.sample_result.trace_x[0, :, i])}")
         print(f"theta_opt: {10**result_marginalized_multi_tau.optimize_result[0].x[i]}")
-        print(f"theta_pub: {importer.parameter_df["nominalValue"].values[i]}")
+        print(f"theta_pub: {importer.parameter_df['nominalValue'].values[i]}")
         print(f"Max: {10**np.max(result_marginalized_multi_tau.sample_result.trace_x[0, :, i])}")
     else:
         print(f"theta_opt: {10**result_marginalized_multi_tau.optimize_result[0].x[i]}")
-        print(f"theta_pub: {importer.parameter_df["nominalValue"].values[i]}")
+        print(f"theta_pub: {importer.parameter_df['nominalValue'].values[i]}")
 
     print("---------------")
 

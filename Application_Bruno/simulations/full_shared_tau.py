@@ -26,8 +26,13 @@ import pandas as pd
 from typing import List, Tuple
 import shutil
 import os
+import sys
+from pathlib import Path
 
-from scipy.stats import norm 
+from scipy.stats import norm
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
+APP_DIR = REPO_ROOT / "Application_Bruno"
 
 TRUNCATED_GAUSSIAN = False
 HIERARCHICAL_SIGMA_TAU = True # not TRUNCATED_GAUSSIAN
@@ -42,17 +47,27 @@ RUN SIMULATIONS: A) SIMULATIONS USING THE WRONG TIME POINTS
 
 # check if the results subfolder exists, otherwise create it
 
-result_folder = "/Users/jakobvanhoefer/Documents/PhD/Projects/Temporal Uncertainties/Application_Bruno/simulations/results/full_shared_tau"
+result_folder = str(APP_DIR / "simulations" / "results" / "full_shared_tau")
 os.makedirs(result_folder, exist_ok=True)
 
 
-# delete all amici folders with content and subfolders:
+def _compile_if_needed(sbml_path, model_name: str, model_dir) -> None:
+    """Compile only if `model_dir` isn't already a compiled AMICI model for
+    `model_name`. Safe to call from multiple concurrent processes as long as
+    the FIRST caller wins the race (see submit_slurm_array.sh's prep step,
+    which compiles once before any array task starts)."""
+    model_dir = Path(model_dir)
+    if not (model_dir / model_name / "__init__.py").exists():
+        sbml_importer = amici.SbmlImporter(str(sbml_path))
+        sbml_importer.sbml2amici(model_name, str(model_dir))
+
+
+# delete only this script's own per-run scratch space. NOT "amici_models"
+# (any of its APP_DIR/simulations/REPO_ROOT candidates -- see wrong_tp.py)
+# or "amici" (see below): both now double as idempotent compiled-model
+# caches that concurrent array tasks share read-only, first-caller-wins.
 amici_files = [
-    "/Users/jakobvanhoefer/Documents/PhD/Projects/Temporal Uncertainties/Application_Bruno/amici_models", 
-    "/Users/jakobvanhoefer/Documents/PhD/Projects/Temporal Uncertainties/Application_Bruno/simulations/amici_models", 
-    "/Users/jakobvanhoefer/Documents/PhD/Projects/Temporal Uncertainties/amici_models", 
-    "/Users/jakobvanhoefer/Documents/PhD/Projects/Temporal Uncertainties/Application_Bruno/simulations/ode_sbml",
-    "/Users/jakobvanhoefer/Documents/PhD/Projects/Temporal Uncertainties/Application_Bruno/amici"
+    str(APP_DIR / "simulations" / "ode_sbml"),
 ]
 
 for amici_folder in amici_files:
@@ -60,24 +75,57 @@ for amici_folder in amici_files:
 
 
 """
-Get the first model (after sorting) for which no result exists yet...
-"""
+Select which PEtab variant this process runs.
 
-petab_dir = "/Users/jakobvanhoefer/Documents/PhD/Projects/Temporal Uncertainties/Application_Bruno/simulations/PEtab_versions"
+PETAB_INDEX < 0 (the default): reproduce the original scan-and-pick
+behavior exactly -- pick the first variant (after sorting, and after
+filtering out multi-timepoint-with-copied-data variants, which are not
+usable by the shared-tau model) with no result yet. This is what
+run_all.sh's local sequential loop still uses.
+
+PETAB_INDEX >= 0 (set via SLURM_ARRAY_TASK_ID or the PETAB_INDEX env var):
+claim that exact variant by position in the full (unfiltered) PEtab
+variant listing -- matching submit_slurm_array.sh's array range, which is
+sized from the raw variant count -- and exit immediately if that variant
+is not applicable to this model (same filter as the default branch) or if
+its result already exists. This is what makes concurrent SLURM array
+tasks safe: each task claims a distinct, deterministic variant instead of
+racing to scan the same "first missing" one.
+"""
+petab_dir = str(APP_DIR / "simulations" / "PEtab_versions")
 petab_models = sorted(f for f in os.listdir(petab_dir) if os.path.isdir(os.path.join(petab_dir, f)))
 
 exisiting_results = sorted(os.path.splitext(f)[0] for f in os.listdir(result_folder))
-# get the list of all models, for which no result exists yet
-# filter for multi-timepoint models with copied data, as they can not be
-# used for the shared tau model
-models_to_run = sorted([
-    model for model in petab_models 
-    if model not in exisiting_results
-    and "copied_data_multi_timepoints" not in model
-])
-model_to_run = models_to_run[0]
 
-petab_yaml = f"/Users/jakobvanhoefer/Documents/PhD/Projects/Temporal Uncertainties/Application_Bruno/simulations/PEtab_versions/{model_to_run}/Bruno_JExpBot2016.yaml"
+PETAB_INDEX = int(os.environ.get("SLURM_ARRAY_TASK_ID", os.environ.get("PETAB_INDEX", "-1")))
+
+if PETAB_INDEX >= 0:
+    model_to_run = petab_models[PETAB_INDEX]
+    if "copied_data_multi_timepoints" in model_to_run:
+        print(f"Variant {model_to_run} (index {PETAB_INDEX}) is not applicable to the shared-tau model, skipping.")
+        sys.exit(0)
+    if model_to_run in exisiting_results:
+        print(f"Result for {model_to_run} (index {PETAB_INDEX}) already exists, skipping.")
+        sys.exit(0)
+    models_to_run = [model_to_run]
+else:
+    # get the list of all models, for which no result exists yet
+    # filter for multi-timepoint models with copied data, as they can not be
+    # used for the shared tau model
+    models_to_run = sorted([
+        model for model in petab_models
+        if model not in exisiting_results
+        and "copied_data_multi_timepoints" not in model
+    ])
+    if not models_to_run:
+        if not os.environ.get("COMPILE_ONLY"):
+            print("All variants already have results, nothing to run.")
+            sys.exit(0)
+        # prep job on a finished set: still compile, using the unperturbed variant
+        models_to_run = ["sigma_tau_0_0"]
+    model_to_run = models_to_run[0]
+
+petab_yaml = str(APP_DIR / "simulations" / "PEtab_versions" / model_to_run / "Bruno_JExpBot2016.yaml")
 
 print(f"Running model {model_to_run} with wrong time points")
 
@@ -86,10 +134,12 @@ print(f"Running model {model_to_run} with wrong time points")
 From here, the copy past of dependencies from full_multi_tau.py starts, but with the shared tau mapping.
 """
 
-sbml_importer = amici.SbmlImporter("/Users/jakobvanhoefer/Documents/PhD/Projects/Temporal Uncertainties/Application_Bruno/petab_bruno_original/model_Bruno_JExpBot2016.xml")
+# Set up the model import -- compiled once into a stable, per-script cache
+# dir; reused as-is by every concurrent array task processing a different
+# PEtab variant, since this model is identical across all variants.
 model_name = "ModelSharedlMultiTau"
-model_dir = "/Users/jakobvanhoefer/Documents/PhD/Projects/Temporal Uncertainties/Application_Bruno/amici"
-sbml_importer.sbml2amici(model_name, model_dir)
+model_dir = str(APP_DIR / "_amici_cache" / "full_shared_tau")
+_compile_if_needed(APP_DIR / "petab_bruno_original" / "model_Bruno_JExpBot2016.xml", model_name, model_dir)
 model_module = amici.import_model_module(model_name, model_dir)
 amici_model = model_module.getModel()
 
@@ -97,10 +147,17 @@ amici_model = model_module.getModel()
 importer = PetabImporter.from_yaml(petab_yaml)
 problem_wrong_tp = importer.create_problem(verbose=False)
 
+# COMPILE_ONLY lets a short prep job compile the model and exit, without
+# running any (multi-hour) optimization -- see submit_slurm_array.sh's prep
+# stage, which depends the array job on this exiting 0 quickly rather than
+# on a full variant finishing within the prep job's time limit.
+if os.environ.get("COMPILE_ONLY"):
+    print("COMPILE_ONLY set: model compiled, exiting without running any variant.")
+    sys.exit(0)
 
 # note: The time points are corrected below, when T_PETAB is deinfed
 tau_shared_df = pd.read_csv(
-    "/Users/jakobvanhoefer/Documents/PhD/Projects/Temporal Uncertainties/Application_Bruno/simulations/shared_parametrization_df.tsv", sep="\t")
+    str(APP_DIR / "simulations" / "shared_parametrization_df.tsv"), sep="\t")
 
 
 # the i-th data point is measured at time point tau[data_index_to_tau_shared_index[i]]
@@ -531,7 +588,9 @@ def neg_log_post_shared_with_grad(
             
             # gradient w.r.t sigma_tau
             if HIERARCHICAL_SIGMA_TAU:
-                d_tau = (tau - t) / np.sqrt(len(taus_shared) * np.sum((taus_shared - T_PETAB_shared)**2))
+                # sigma_tau is the profiled optimum sqrt(S/N); by the envelope theorem
+                # d/dtau of the profiled prior is (tau - t) / sigma_tau^2 = N (tau - t) / S.
+                d_tau = (tau - t) / sigma_tau**2
             else:
                 d_sigma_tau = 1 / sigma_tau - ((tau - t)**2) / (sigma_tau**3)
                 d_tau = (tau - t) / (sigma_tau**2)
@@ -579,7 +638,12 @@ Import Multi-Threading
 """
 import threading
 from pypesto.engine import MultiThreadEngine
-engine = MultiThreadEngine(n_threads=os.cpu_count())
+# Under SLURM, os.cpu_count() reports the NODE's total cores, not this
+# array task's allocation -- SLURM_CPUS_PER_TASK reflects what --cpus-per-task
+# actually reserved for this task. Falls back to os.cpu_count() for local runs
+# (no SLURM_CPUS_PER_TASK set).
+N_THREADS = int(os.environ.get("SLURM_CPUS_PER_TASK", os.cpu_count()))
+engine = MultiThreadEngine(n_threads=N_THREADS)
 
 _thread_local = threading.local()
 

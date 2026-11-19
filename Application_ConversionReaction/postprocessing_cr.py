@@ -26,10 +26,9 @@ There are two dfs:
 """
 import re
 from pathlib import Path
+import h5py
 import numpy as np
-import pypesto.store as store
-from pypesto.sample.geweke_test import calculate_zscore
-from scipy.stats import chi2
+from mcmc_diagnostics import N_THETA, chain_diagnostics
 
 def extract_values(file_path, keys):
     """
@@ -86,45 +85,59 @@ keys_to_find = [
         "run_time_sampling_marginalized"]
 
 
-def joint_geweke_test_from_chain(chain, burn_in=None, a=0.1, b=0.5):
-    chain = np.asarray(chain)  # use the full chain, no burn-in removal
-    z_scores, _ = calculate_zscore(chain, a=a, b=b)
-    z_scores = z_scores.flatten()
-    T = np.max(np.abs(z_scores))
-    # T = float(np.sum(z_scores**2))
-    # p_joint = float(1 - chi2.cdf(T, df=len(z_scores)))
-    p_joint = float(1 - chi2.cdf(T, df=1))
-    return T, p_joint
+# ESS, ESS/s and burn-in in measurement_setup.yaml come from pyPESTO's Geweke
+# test, which is miscalibrated (see mcmc_diagnostics.py). They are kept with a
+# "pypesto_" prefix for reference and recomputed from the stored chains below.
+PYPESTO_KEYS = [
+        "ESS_full",
+        "ESS_marginalized",
+        "ESS_per_second_full",
+        "ESS_per_second_marginalized",
+        "geweke_burn_in_full",
+        "geweke_burn_in_marginalized"]
 
 
 run_dicts = {}
 for res_i in res_folders:
-    extracted_values = extract_values(
-        f"{FILE_PATH}/{res_i.name}/measurement_setup.yaml", keys_to_find)
+    yaml_path = FILE_PATH / res_i.name / "measurement_setup.yaml"
+    if not yaml_path.exists():
+        # e.g. sampling crashed for this setup before the run finished
+        # (measurement_setup.yaml is only written once, at the very end of
+        # a setup's run) -- skip it rather than crash on a missing file.
+        print(f"Warning: {res_i.name} has no measurement_setup.yaml (run did not finish) -- skipping")
+        continue
+
+    extracted_values = extract_values(str(yaml_path), keys_to_find)
+    for key in PYPESTO_KEYS:
+        extracted_values[f"pypesto_{key}"] = extracted_values.pop(key)
 
     extracted_values["converged_full"] = None
     extracted_values["converged_marginalized"] = None
 
-    # Compute joint Geweke z-score and p-value from HDF5
+    # Geweke z-score, burn-in and ESS on theta, recomputed from the stored chain
     for model in ["full", "marginalized"]:
         hdf5_path = FILE_PATH / res_i.name / f"result_{model}.hdf5"
-        T_val, p_val = None, None
+        diagnostics = dict.fromkeys(
+            ["geweke_z_score", "geweke_window_ess", "burn_in", "ESS", "ESS_per_second"])
         if hdf5_path.exists():
             try:
-                result = store.read_result(str(hdf5_path), problem=False)
-                chain = result.sample_result.trace_x[0]
-                T_val, p_val = joint_geweke_test_from_chain(chain)
+                with h5py.File(hdf5_path, "r") as f:
+                    chain = f["sampling/results/trace_x"][0, :, :N_THETA]
+                    sampling_time = float(f["sampling/results"].attrs["time"])
+                diagnostics = chain_diagnostics(chain, sampling_time)
             except Exception as e:
-                print(f"Warning: could not compute Geweke for {res_i.name}/{model}: {e}")
+                print(f"Warning: could not compute diagnostics for {res_i.name}/{model}: {e}")
 
-        extracted_values[f"geweke_z_score_{model}"] = T_val   # this is the chi2 statistic T
-        extracted_values[f"geweke_p_value_{model}"] = p_val
+        extracted_values[f"geweke_z_score_{model}"] = diagnostics["geweke_z_score"]  # max |z| over theta
+        extracted_values[f"geweke_window_ess_{model}"] = diagnostics["geweke_window_ess"]
+        extracted_values[f"geweke_burn_in_{model}"] = diagnostics["burn_in"]  # None = not converged
+        extracted_values[f"ESS_{model}"] = diagnostics["ESS"]
+        extracted_values[f"ESS_per_second_{model}"] = diagnostics["ESS_per_second"]
 
     run_dicts[res_i.name] = extracted_values
 
 """
 run_dicts = {}
-# STORAGE_FOR_REPEATED_EXPERIMENTS = "/Users/jakobvanhoefer/Documents/PhD/Projects/Temporal Uncertainties/Application_ConversionReaction/"
 for res_i in res_folders: 
     extracted_values = extract_values(f"{FILE_PATH}/{res_i.name}/measurement_setup.yaml", keys_to_find)
     
@@ -157,483 +170,329 @@ for k, v in run_dicts.items():
 
 ADD_CONVERGENCE_INFO = True
 
+def _set_convergence(key, converged_full, converged_marginalized):
+    # res_014 (and any setup whose run crashed/is missing from disk) has no
+    # entry in run_dicts -- skip rather than KeyError.
+    if key not in run_dicts:
+        print(f"Warning: {key} not in run_dicts -- skipping hardcoded convergence info")
+        return
+    run_dicts[key]["converged_full"] = converged_full
+    run_dicts[key]["converged_marginalized"] = converged_marginalized
+
 if ADD_CONVERGENCE_INFO:
-    run_dicts[f"res_004"]["converged_full"] = True
-    run_dicts[f"res_004"]["converged_marginalized"] = True
+    _set_convergence("res_004", True, True)
 
-    run_dicts[f"res_005"]["converged_full"] = True
-    run_dicts[f"res_005"]["converged_marginalized"] = True
+    _set_convergence("res_005", True, True)
 
-    run_dicts[f"res_006"]["converged_full"] = True
-    run_dicts[f"res_006"]["converged_marginalized"] = True
+    _set_convergence("res_006", True, True)
 
-    run_dicts[f"res_007"]["converged_full"] = True
-    run_dicts[f"res_007"]["converged_marginalized"] = True
+    _set_convergence("res_007", True, True)
 
-    run_dicts[f"res_008"]["converged_full"] = True
-    run_dicts[f"res_008"]["converged_marginalized"] = True
+    _set_convergence("res_008", True, True)
 
-    run_dicts[f"res_009"]["converged_full"] = False
-    run_dicts[f"res_009"]["converged_marginalized"] = True
+    _set_convergence("res_009", False, True)
 
-    run_dicts[f"res_010"]["converged_full"] = False
-    run_dicts[f"res_010"]["converged_marginalized"] = True
+    _set_convergence("res_010", False, True)
 
-    run_dicts[f"res_011"]["converged_full"] = False
-    run_dicts[f"res_011"]["converged_marginalized"] = True
+    _set_convergence("res_011", False, True)
 
-    run_dicts[f"res_012"]["converged_full"] = True
-    run_dicts[f"res_012"]["converged_marginalized"] = True
+    _set_convergence("res_012", True, True)
 
-    run_dicts[f"res_013"]["converged_full"] = False
-    run_dicts[f"res_013"]["converged_marginalized"] = True
+    _set_convergence("res_013", False, True)
 
-    run_dicts[f"res_014"]["converged_full"] = False
-    run_dicts[f"res_014"]["converged_marginalized"] = False
+    _set_convergence("res_014", False, False)
 
-    run_dicts[f"res_015"]["converged_full"] = False
-    run_dicts[f"res_015"]["converged_marginalized"] = False
+    _set_convergence("res_015", False, False)
 
-    run_dicts[f"res_016"]["converged_full"] = False
-    run_dicts[f"res_016"]["converged_marginalized"] = True
+    _set_convergence("res_016", False, True)
 
-    run_dicts[f"res_017"]["converged_full"] = False
-    run_dicts[f"res_017"]["converged_marginalized"] = True
+    _set_convergence("res_017", False, True)
 
-    run_dicts[f"res_018"]["converged_full"] = False
-    run_dicts[f"res_018"]["converged_marginalized"] = False
+    _set_convergence("res_018", False, False)
 
-    run_dicts[f"res_019"]["converged_full"] = False
-    run_dicts[f"res_019"]["converged_marginalized"] = True
+    _set_convergence("res_019", False, True)
 
-    run_dicts[f"res_020"]["converged_full"] = False
-    run_dicts[f"res_020"]["converged_marginalized"] = False
+    _set_convergence("res_020", False, False)
 
-    run_dicts[f"res_021"]["converged_full"] = False
-    run_dicts[f"res_021"]["converged_marginalized"] = True
+    _set_convergence("res_021", False, True)
 
-    run_dicts[f"res_022"]["converged_full"] = False
-    run_dicts[f"res_022"]["converged_marginalized"] = True
+    _set_convergence("res_022", False, True)
 
-    run_dicts[f"res_023"]["converged_full"] = False
-    run_dicts[f"res_023"]["converged_marginalized"] = True
+    _set_convergence("res_023", False, True)
 
-    run_dicts[f"res_024"]["converged_full"] = False
-    run_dicts[f"res_024"]["converged_marginalized"] = False
+    _set_convergence("res_024", False, False)
 
-    run_dicts[f"res_025"]["converged_full"] = False
-    run_dicts[f"res_025"]["converged_marginalized"] = True
+    _set_convergence("res_025", False, True)
 
-    run_dicts[f"res_026"]["converged_full"] = True
-    run_dicts[f"res_026"]["converged_marginalized"] = True
+    _set_convergence("res_026", True, True)
 
-    run_dicts[f"res_027"]["converged_full"] = True
-    run_dicts[f"res_027"]["converged_marginalized"] = True
+    _set_convergence("res_027", True, True)
 
-    run_dicts[f"res_028"]["converged_full"] = True
-    run_dicts[f"res_028"]["converged_marginalized"] = True
+    _set_convergence("res_028", True, True)
 
-    run_dicts[f"res_029"]["converged_full"] = True
-    run_dicts[f"res_029"]["converged_marginalized"] = True
+    _set_convergence("res_029", True, True)
 
-    run_dicts[f"res_030"]["converged_full"] = True
-    run_dicts[f"res_030"]["converged_marginalized"] = True
+    _set_convergence("res_030", True, True)
 
-    run_dicts[f"res_031"]["converged_full"] = False
-    run_dicts[f"res_031"]["converged_marginalized"] = True
+    _set_convergence("res_031", False, True)
 
-    run_dicts[f"res_032"]["converged_full"] = False
-    run_dicts[f"res_032"]["converged_marginalized"] = True
+    _set_convergence("res_032", False, True)
 
-    run_dicts[f"res_033"]["converged_full"] = False
-    run_dicts[f"res_033"]["converged_marginalized"] = True
+    _set_convergence("res_033", False, True)
 
-    run_dicts[f"res_034"]["converged_full"] = False
-    run_dicts[f"res_034"]["converged_marginalized"] = True
+    _set_convergence("res_034", False, True)
 
-    run_dicts[f"res_035"]["converged_full"] = False
-    run_dicts[f"res_035"]["converged_marginalized"] = True
+    _set_convergence("res_035", False, True)
 
-    run_dicts[f"res_036"]["converged_full"] = False
-    run_dicts[f"res_036"]["converged_marginalized"] = False
+    _set_convergence("res_036", False, False)
 
-    run_dicts[f"res_037"]["converged_full"] = False
-    run_dicts[f"res_037"]["converged_marginalized"] = False
+    _set_convergence("res_037", False, False)
 
-    run_dicts[f"res_038"]["converged_full"] = False
-    run_dicts[f"res_038"]["converged_marginalized"] = True
+    _set_convergence("res_038", False, True)
 
-    run_dicts[f"res_039"]["converged_full"] = False
-    run_dicts[f"res_039"]["converged_marginalized"] = True
+    _set_convergence("res_039", False, True)
 
-    run_dicts[f"res_040"]["converged_full"] = False
-    run_dicts[f"res_040"]["converged_marginalized"] = True
+    _set_convergence("res_040", False, True)
 
-    run_dicts[f"res_041"]["converged_full"] = False
-    run_dicts[f"res_041"]["converged_marginalized"] = True
+    _set_convergence("res_041", False, True)
 
-    run_dicts[f"res_042"]["converged_full"] = True
-    run_dicts[f"res_042"]["converged_marginalized"] = False
+    _set_convergence("res_042", True, False)
 
-    run_dicts[f"res_043"]["converged_full"] = False
-    run_dicts[f"res_043"]["converged_marginalized"] = True
+    _set_convergence("res_043", False, True)
 
-    run_dicts[f"res_044"]["converged_full"] = True
-    run_dicts[f"res_044"]["converged_marginalized"] = True
+    _set_convergence("res_044", True, True)
 
-    run_dicts[f"res_045"]["converged_full"] = True
-    run_dicts[f"res_045"]["converged_marginalized"] = True
+    _set_convergence("res_045", True, True)
 
-    run_dicts[f"res_046"]["converged_full"] = False
-    run_dicts[f"res_046"]["converged_marginalized"] = True
+    _set_convergence("res_046", False, True)
 
-    run_dicts[f"res_047"]["converged_full"] = False
-    run_dicts[f"res_047"]["converged_marginalized"] = True
+    _set_convergence("res_047", False, True)
 
-    run_dicts[f"res_048"]["converged_full"] = False
-    run_dicts[f"res_048"]["converged_marginalized"] = True
+    _set_convergence("res_048", False, True)
 
-    run_dicts[f"res_049"]["converged_full"] = False
-    run_dicts[f"res_049"]["converged_marginalized"] = True
+    _set_convergence("res_049", False, True)
 
-    run_dicts[f"res_050"]["converged_full"] = False
-    run_dicts[f"res_050"]["converged_marginalized"] = False
+    _set_convergence("res_050", False, False)
 
-    run_dicts[f"res_051"]["converged_full"] = False
-    run_dicts[f"res_051"]["converged_marginalized"] = True
+    _set_convergence("res_051", False, True)
 
-    run_dicts[f"res_052"]["converged_full"] = False
-    run_dicts[f"res_052"]["converged_marginalized"] = False
+    _set_convergence("res_052", False, False)
 
-    run_dicts[f"res_053"]["converged_full"] = False
-    run_dicts[f"res_053"]["converged_marginalized"] = True
+    _set_convergence("res_053", False, True)
 
-    run_dicts[f"res_054"]["converged_full"] = True
-    run_dicts[f"res_054"]["converged_marginalized"] = True
+    _set_convergence("res_054", True, True)
 
-    run_dicts[f"res_055"]["converged_full"] = True
-    run_dicts[f"res_055"]["converged_marginalized"] = True
+    _set_convergence("res_055", True, True)
     
-    run_dicts[f"res_056"]["converged_full"] = True
-    run_dicts[f"res_056"]["converged_marginalized"] = True
+    _set_convergence("res_056", True, True)
 
-    run_dicts[f"res_057"]["converged_full"] = False
-    run_dicts[f"res_057"]["converged_marginalized"] = True
+    _set_convergence("res_057", False, True)
 
-    run_dicts[f"res_058"]["converged_full"] = False
-    run_dicts[f"res_058"]["converged_marginalized"] = True
+    _set_convergence("res_058", False, True)
 
-    run_dicts[f"res_059"]["converged_full"] = True
-    run_dicts[f"res_059"]["converged_marginalized"] = True
+    _set_convergence("res_059", True, True)
 
-    run_dicts[f"res_060"]["converged_full"] = True
-    run_dicts[f"res_060"]["converged_marginalized"] = True
+    _set_convergence("res_060", True, True)
 
-    run_dicts[f"res_061"]["converged_full"] = True
-    run_dicts[f"res_061"]["converged_marginalized"] = True
+    _set_convergence("res_061", True, True)
 
-    run_dicts[f"res_062"]["converged_full"] = False
-    run_dicts[f"res_062"]["converged_marginalized"] = True
+    _set_convergence("res_062", False, True)
 
-    run_dicts[f"res_063"]["converged_full"] = False
-    run_dicts[f"res_063"]["converged_marginalized"] = False
+    _set_convergence("res_063", False, False)
 
-    run_dicts[f"res_064"]["converged_full"] = False
-    run_dicts[f"res_064"]["converged_marginalized"] = True
+    _set_convergence("res_064", False, True)
 
-    run_dicts[f"res_065"]["converged_full"] = False
-    run_dicts[f"res_065"]["converged_marginalized"] = True
+    _set_convergence("res_065", False, True)
 
-    run_dicts[f"res_066"]["converged_full"] = False
-    run_dicts[f"res_066"]["converged_marginalized"] = True
+    _set_convergence("res_066", False, True)
 
-    run_dicts[f"res_067"]["converged_full"] = False
-    run_dicts[f"res_067"]["converged_marginalized"] = True
+    _set_convergence("res_067", False, True)
         
-    run_dicts[f"res_068"]["converged_full"] = True
-    run_dicts[f"res_068"]["converged_marginalized"] = True
+    _set_convergence("res_068", True, True)
 
-    run_dicts[f"res_069"]["converged_full"] = True
-    run_dicts[f"res_069"]["converged_marginalized"] = True
+    _set_convergence("res_069", True, True)
 
-    run_dicts[f"res_070"]["converged_full"] = True
-    run_dicts[f"res_070"]["converged_marginalized"] = False
+    _set_convergence("res_070", True, False)
 
-    run_dicts[f"res_071"]["converged_full"] = False
-    run_dicts[f"res_071"]["converged_marginalized"] = True
+    _set_convergence("res_071", False, True)
 
-    run_dicts[f"res_072"]["converged_full"] = True
-    run_dicts[f"res_072"]["converged_marginalized"] = True
+    _set_convergence("res_072", True, True)
 
-    run_dicts[f"res_073"]["converged_full"] = True
-    run_dicts[f"res_073"]["converged_marginalized"] = True
+    _set_convergence("res_073", True, True)
 
-    run_dicts[f"res_074"]["converged_full"] = True
-    run_dicts[f"res_074"]["converged_marginalized"] = True
+    _set_convergence("res_074", True, True)
 
-    run_dicts[f"res_075"]["converged_full"] = False
-    run_dicts[f"res_075"]["converged_marginalized"] = True
+    _set_convergence("res_075", False, True)
 
-    run_dicts[f"res_076"]["converged_full"] = True
-    run_dicts[f"res_076"]["converged_marginalized"] = True
+    _set_convergence("res_076", True, True)
 
-    run_dicts[f"res_077"]["converged_full"] = False
-    run_dicts[f"res_077"]["converged_marginalized"] = True
+    _set_convergence("res_077", False, True)
 
-    run_dicts[f"res_078"]["converged_full"] = False
-    run_dicts[f"res_078"]["converged_marginalized"] = False
+    _set_convergence("res_078", False, False)
 
-    run_dicts[f"res_079"]["converged_full"] = False
-    run_dicts[f"res_079"]["converged_marginalized"] = True
+    _set_convergence("res_079", False, True)
 
-    run_dicts[f"res_080"]["converged_full"] = False
-    run_dicts[f"res_080"]["converged_marginalized"] = True
+    _set_convergence("res_080", False, True)
 
-    run_dicts[f"res_081"]["converged_full"] = False
-    run_dicts[f"res_081"]["converged_marginalized"] = True
+    _set_convergence("res_081", False, True)
 
-    run_dicts[f"res_082"]["converged_full"] = True
-    run_dicts[f"res_082"]["converged_marginalized"] = True
+    _set_convergence("res_082", True, True)
 
-    run_dicts[f"res_083"]["converged_full"] = False
-    run_dicts[f"res_083"]["converged_marginalized"] = True
+    _set_convergence("res_083", False, True)
 
-    run_dicts[f"res_084"]["converged_full"] = False
-    run_dicts[f"res_084"]["converged_marginalized"] = True
+    _set_convergence("res_084", False, True)
 
-    run_dicts[f"res_085"]["converged_full"] = False
-    run_dicts[f"res_085"]["converged_marginalized"] = True
+    _set_convergence("res_085", False, True)
 
-    run_dicts[f"res_086"]["converged_full"] = True
-    run_dicts[f"res_086"]["converged_marginalized"] = True
+    _set_convergence("res_086", True, True)
 
-    run_dicts[f"res_087"]["converged_full"] = False
-    run_dicts[f"res_087"]["converged_marginalized"] = True
+    _set_convergence("res_087", False, True)
 
-    run_dicts[f"res_088"]["converged_full"] = True
-    run_dicts[f"res_088"]["converged_marginalized"] = True
+    _set_convergence("res_088", True, True)
 
-    run_dicts[f"res_089"]["converged_full"] = False
-    run_dicts[f"res_089"]["converged_marginalized"] = True
+    _set_convergence("res_089", False, True)
 
-    run_dicts[f"res_090"]["converged_full"] = False
-    run_dicts[f"res_090"]["converged_marginalized"] = False
+    _set_convergence("res_090", False, False)
 
-    run_dicts[f"res_091"]["converged_full"] = False
-    run_dicts[f"res_091"]["converged_marginalized"] = True
+    _set_convergence("res_091", False, True)
 
-    run_dicts[f"res_092"]["converged_full"] = False
-    run_dicts[f"res_092"]["converged_marginalized"] = False
+    _set_convergence("res_092", False, False)
 
-    run_dicts[f"res_093"]["converged_full"] = False
-    run_dicts[f"res_093"]["converged_marginalized"] = True
+    _set_convergence("res_093", False, True)
 
-    run_dicts[f"res_094"]["converged_full"] = False
-    run_dicts[f"res_094"]["converged_marginalized"] = True
+    _set_convergence("res_094", False, True)
 
-    run_dicts[f"res_095"]["converged_full"] = False
-    run_dicts[f"res_095"]["converged_marginalized"] = True
+    _set_convergence("res_095", False, True)
 
-    run_dicts[f"res_096"]["converged_full"] = True
-    run_dicts[f"res_096"]["converged_marginalized"] = True
+    _set_convergence("res_096", True, True)
 
-    run_dicts[f"res_097"]["converged_full"] = True
-    run_dicts[f"res_097"]["converged_marginalized"] = True
+    _set_convergence("res_097", True, True)
 
-    run_dicts[f"res_098"]["converged_full"] = False
-    run_dicts[f"res_098"]["converged_marginalized"] = True
+    _set_convergence("res_098", False, True)
 
-    run_dicts[f"res_099"]["converged_full"] = True
-    run_dicts[f"res_099"]["converged_marginalized"] = True
+    _set_convergence("res_099", True, True)
 
-    run_dicts[f"res_100"]["converged_full"] = True
-    run_dicts[f"res_100"]["converged_marginalized"] = True
+    _set_convergence("res_100", True, True)
 
-    run_dicts[f"res_101"]["converged_full"] = False
-    run_dicts[f"res_101"]["converged_marginalized"] = True
+    _set_convergence("res_101", False, True)
 
-    run_dicts[f"res_102"]["converged_full"] = False
-    run_dicts[f"res_102"]["converged_marginalized"] = True
+    _set_convergence("res_102", False, True)
 
-    run_dicts[f"res_103"]["converged_full"] = False
-    run_dicts[f"res_103"]["converged_marginalized"] = True
+    _set_convergence("res_103", False, True)
 
-    run_dicts[f"res_104"]["converged_full"] = False
-    run_dicts[f"res_104"]["converged_marginalized"] = True
+    _set_convergence("res_104", False, True)
 
-    run_dicts[f"res_105"]["converged_full"] = False
-    run_dicts[f"res_105"]["converged_marginalized"] = True
+    _set_convergence("res_105", False, True)
 
-    run_dicts[f"res_106"]["converged_full"] = False
-    run_dicts[f"res_106"]["converged_marginalized"] = True
+    _set_convergence("res_106", False, True)
 
-    run_dicts[f"res_107"]["converged_full"] = False
-    run_dicts[f"res_107"]["converged_marginalized"] = False
+    _set_convergence("res_107", False, False)
 
-    run_dicts[f"res_108"]["converged_full"] = False
-    run_dicts[f"res_108"]["converged_marginalized"] = True
+    _set_convergence("res_108", False, True)
 
-    run_dicts[f"res_109"]["converged_full"] = False
-    run_dicts[f"res_109"]["converged_marginalized"] = False
+    _set_convergence("res_109", False, False)
     
-    run_dicts[f"res_110"]["converged_full"] = True
-    run_dicts[f"res_110"]["converged_marginalized"] = True
+    _set_convergence("res_110", True, True)
 
-    run_dicts[f"res_111"]["converged_full"] = True
-    run_dicts[f"res_111"]["converged_marginalized"] = True
+    _set_convergence("res_111", True, True)
 
-    run_dicts[f"res_112"]["converged_full"] = False
-    run_dicts[f"res_112"]["converged_marginalized"] = True
+    _set_convergence("res_112", False, True)
 
-    run_dicts[f"res_113"]["converged_full"] = True
-    run_dicts[f"res_113"]["converged_marginalized"] = True
+    _set_convergence("res_113", True, True)
 
-    run_dicts[f"res_114"]["converged_full"] = True
-    run_dicts[f"res_114"]["converged_marginalized"] = True
+    _set_convergence("res_114", True, True)
 
-    run_dicts[f"res_115"]["converged_full"] = True
-    run_dicts[f"res_115"]["converged_marginalized"] = None
+    _set_convergence("res_115", True, None)
 
-    run_dicts[f"res_116"]["converged_full"] = True
-    run_dicts[f"res_116"]["converged_marginalized"] = True
+    _set_convergence("res_116", True, True)
 
-    run_dicts[f"res_117"]["converged_full"] = False
-    run_dicts[f"res_117"]["converged_marginalized"] = True
+    _set_convergence("res_117", False, True)
 
-    run_dicts[f"res_118"]["converged_full"] = False
-    run_dicts[f"res_118"]["converged_marginalized"] = True
+    _set_convergence("res_118", False, True)
 
-    run_dicts[f"res_119"]["converged_full"] = False
-    run_dicts[f"res_119"]["converged_marginalized"] = True
+    _set_convergence("res_119", False, True)
 
-    run_dicts[f"res_120"]["converged_full"] = False
-    run_dicts[f"res_120"]["converged_marginalized"] = True
+    _set_convergence("res_120", False, True)
 
-    run_dicts[f"res_121"]["converged_full"] = False
-    run_dicts[f"res_121"]["converged_marginalized"] = True
+    _set_convergence("res_121", False, True)
     
-    run_dicts[f"res_122"]["converged_full"] = False
-    run_dicts[f"res_122"]["converged_marginalized"] = False
+    _set_convergence("res_122", False, False)
 
-    run_dicts[f"res_123"]["converged_full"] = False
-    run_dicts[f"res_123"]["converged_marginalized"] = True
+    _set_convergence("res_123", False, True)
     
-    run_dicts[f"res_124"]["converged_full"] = True
-    run_dicts[f"res_124"]["converged_marginalized"] = True
+    _set_convergence("res_124", True, True)
     
-    run_dicts[f"res_125"]["converged_full"] = True
-    run_dicts[f"res_125"]["converged_marginalized"] = True
+    _set_convergence("res_125", True, True)
     
-    run_dicts[f"res_126"]["converged_full"] = True
-    run_dicts[f"res_126"]["converged_marginalized"] = True
+    _set_convergence("res_126", True, True)
     
-    run_dicts[f"res_127"]["converged_full"] = True
-    run_dicts[f"res_127"]["converged_marginalized"] = True
+    _set_convergence("res_127", True, True)
     
-    run_dicts[f"res_128"]["converged_full"] = False
-    run_dicts[f"res_128"]["converged_marginalized"] = False
+    _set_convergence("res_128", False, False)
     
-    run_dicts[f"res_129"]["converged_full"] = True
-    run_dicts[f"res_129"]["converged_marginalized"] = True
+    _set_convergence("res_129", True, True)
 
-    run_dicts[f"res_130"]["converged_full"] = False
-    run_dicts[f"res_130"]["converged_marginalized"] = True
+    _set_convergence("res_130", False, True)
 
-    run_dicts[f"res_131"]["converged_full"] = False
-    run_dicts[f"res_131"]["converged_marginalized"] = False
+    _set_convergence("res_131", False, False)
 
-    run_dicts[f"res_132"]["converged_full"] = False
-    run_dicts[f"res_132"]["converged_marginalized"] = True
+    _set_convergence("res_132", False, True)
     
-    run_dicts[f"res_133"]["converged_full"] = False
-    run_dicts[f"res_133"]["converged_marginalized"] = True
+    _set_convergence("res_133", False, True)
     
-    run_dicts[f"res_134"]["converged_full"] = False
-    run_dicts[f"res_134"]["converged_marginalized"] = True
+    _set_convergence("res_134", False, True)
     
-    run_dicts[f"res_135"]["converged_full"] = False
-    run_dicts[f"res_135"]["converged_marginalized"] = True
+    _set_convergence("res_135", False, True)
     
-    run_dicts[f"res_136"]["converged_full"] = False
-    run_dicts[f"res_136"]["converged_marginalized"] = False
+    _set_convergence("res_136", False, False)
     
-    run_dicts[f"res_137"]["converged_full"] = False
-    run_dicts[f"res_137"]["converged_marginalized"] = True
+    _set_convergence("res_137", False, True)
     
-    run_dicts[f"res_138"]["converged_full"] = True
-    run_dicts[f"res_138"]["converged_marginalized"] = True
+    _set_convergence("res_138", True, True)
     
-    run_dicts[f"res_139"]["converged_full"] = True
-    run_dicts[f"res_139"]["converged_marginalized"] = True
+    _set_convergence("res_139", True, True)
     
-    run_dicts[f"res_140"]["converged_full"] = True
-    run_dicts[f"res_140"]["converged_marginalized"] = True
+    _set_convergence("res_140", True, True)
     
-    run_dicts[f"res_141"]["converged_full"] = True
-    run_dicts[f"res_141"]["converged_marginalized"] = True
+    _set_convergence("res_141", True, True)
     
-    run_dicts[f"res_142"]["converged_full"] = True
-    run_dicts[f"res_142"]["converged_marginalized"] = True
+    _set_convergence("res_142", True, True)
     
-    run_dicts[f"res_143"]["converged_full"] = True
-    run_dicts[f"res_143"]["converged_marginalized"] = True
+    _set_convergence("res_143", True, True)
     
-    run_dicts[f"res_144"]["converged_full"] = False
-    run_dicts[f"res_144"]["converged_marginalized"] = True
+    _set_convergence("res_144", False, True)
     
-    run_dicts[f"res_145"]["converged_full"] = False
-    run_dicts[f"res_145"]["converged_marginalized"] = True
+    _set_convergence("res_145", False, True)
     
-    run_dicts[f"res_146"]["converged_full"] = False
-    run_dicts[f"res_146"]["converged_marginalized"] = False
+    _set_convergence("res_146", False, False)
     
-    run_dicts[f"res_147"]["converged_full"] = False
-    run_dicts[f"res_147"]["converged_marginalized"] = True
+    _set_convergence("res_147", False, True)
     
-    run_dicts[f"res_148"]["converged_full"] = False
-    run_dicts[f"res_148"]["converged_marginalized"] = True
+    _set_convergence("res_148", False, True)
     
-    run_dicts[f"res_149"]["converged_full"] = False
-    run_dicts[f"res_149"]["converged_marginalized"] = True
+    _set_convergence("res_149", False, True)
     
-    run_dicts[f"res_150"]["converged_full"] = False
-    run_dicts[f"res_150"]["converged_marginalized"] = True
+    _set_convergence("res_150", False, True)
     
-    run_dicts[f"res_151"]["converged_full"] = False
-    run_dicts[f"res_151"]["converged_marginalized"] = False
+    _set_convergence("res_151", False, False)
     
-    run_dicts[f"res_152"]["converged_full"] = False
-    run_dicts[f"res_152"]["converged_marginalized"] = True
+    _set_convergence("res_152", False, True)
     
-    run_dicts[f"res_153"]["converged_full"] = False
-    run_dicts[f"res_153"]["converged_marginalized"] = True
+    _set_convergence("res_153", False, True)
     
-    run_dicts[f"res_154"]["converged_full"] = True
-    run_dicts[f"res_154"]["converged_marginalized"] = True
+    _set_convergence("res_154", True, True)
     
-    run_dicts[f"res_155"]["converged_full"] = False
-    run_dicts[f"res_155"]["converged_marginalized"] = True
+    _set_convergence("res_155", False, True)
     
-    run_dicts[f"res_156"]["converged_full"] = False
-    run_dicts[f"res_156"]["converged_marginalized"] = True
+    _set_convergence("res_156", False, True)
     
-    run_dicts[f"res_157"]["converged_full"] = False
-    run_dicts[f"res_157"]["converged_marginalized"] = False
+    _set_convergence("res_157", False, False)
     
-    run_dicts[f"res_158"]["converged_full"] = False
-    run_dicts[f"res_158"]["converged_marginalized"] = True
+    _set_convergence("res_158", False, True)
     
-    run_dicts[f"res_159"]["converged_full"] = False 
-    run_dicts[f"res_159"]["converged_marginalized"] = False
+    _set_convergence("res_159", False, False)
     
-    run_dicts[f"res_160"]["converged_full"] = False
-    run_dicts[f"res_160"]["converged_marginalized"] = True
-
-
-
-import numpy as np
-from scipy.stats import chi2
-from pypesto.sample.geweke_test import calculate_zscore
+    _set_convergence("res_160", False, True)
 
 
 

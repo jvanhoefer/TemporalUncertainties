@@ -9,11 +9,11 @@ res1_aggregated = {key: [d[key] for d in res1] for key in res1[0]}
 
 res2 = simulate_for_condition(condition, theta_extended, amici_model)
 
-print(f"Diff in sim {np.max(np.abs(res1_aggregated["sim"] - res2["sim"]))}")
-print(f"Diff in data {np.max(np.abs(res1_aggregated["data"] - res2["data"]))}")
-print(f"Diff in {key} {np.max(np.abs(res1_aggregated["t"] - res2["ts"]))}")
-print(f"Diff in {key} {np.max(np.abs(res1_aggregated["tau"] - res2["taus"]))}")
-print(f"Diff in {key} {np.max(np.abs(res1_aggregated["sigma_y"] - res2["sigma_ys"]))}")
+print(f"Diff in sim {np.max(np.abs(res1_aggregated['sim'] - res2['sim']))}")
+print(f"Diff in data {np.max(np.abs(res1_aggregated['data'] - res2['data']))}")
+print(f"Diff in {key} {np.max(np.abs(res1_aggregated['t'] - res2['ts']))}")
+print(f"Diff in {key} {np.max(np.abs(res1_aggregated['tau'] - res2['taus']))}")
+print(f"Diff in {key} {np.max(np.abs(res1_aggregated['sigma_y'] - res2['sigma_ys']))}")
 
 
 

@@ -5,15 +5,23 @@ import pypesto.visualize as visualize
 import matplotlib.pyplot as plt
 import pypesto.store as store
 import numpy as np
+import os
 import yaml2sbml
 import amici
 import pandas as pd
 import seaborn as sns
 
+from pathlib import Path
+import mcmc_diagnostics
+from mcmc_diagnostics import Z_THRESHOLD
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+APP_DIR = REPO_ROOT / "Application_ConversionReaction"
+
 N_EXPERIMENT = 4
 # RANDOM_SEED = 0
-STORAGE_DIR_BASE = f"/Users/jakobvanhoefer/Documents/PhD/Projects/Temporal Uncertainties/Application_ConversionReaction/res_{N_EXPERIMENT}"
-STORAGE_FOR_REPEATED_EXPERIMENTS = f"/Users/jakobvanhoefer/Documents/PhD/Projects/Temporal Uncertainties/Application_ConversionReaction/"
+STORAGE_DIR_BASE = str(APP_DIR / f"res_{N_EXPERIMENT}")
+STORAGE_FOR_REPEATED_EXPERIMENTS = str(APP_DIR)
 
 T_PLOT_MAX = 3.5
 CI_VAL = 0.95
@@ -26,7 +34,8 @@ LINE_WIDTH = 3
 CAP_SIZE   = 6
 CAP_THICK  = LINE_WIDTH 
 
-FIGURE_STORE_DIR = "/Users/jakobvanhoefer/Documents/PhD/Projects/Temporal Uncertainties/Figures Paper/building_blocks"
+FIGURE_STORE_DIR = str(REPO_ROOT / "Figures Paper" / "building_blocks")
+os.makedirs(FIGURE_STORE_DIR, exist_ok=True)
 
 DATAFORMAT = "svg"
 
@@ -64,14 +73,14 @@ T_SIM_END = T_WRONG[-1] + 3 * SIGMA_TAU # the end of the integration for the mar
 Z_MIN = 1e-300
 
 
-yaml_dir = "/Users/jakobvanhoefer/Documents/PhD/Projects/Temporal Uncertainties/Application_ConversionReaction/models/conversion_reaction_base.yaml"
-sbml_dir = "/Users/jakobvanhoefer/Documents/PhD/Projects/Temporal Uncertainties/Application_ConversionReaction/models/conversion_reaction_base.xml"
+yaml_dir = str(APP_DIR / "models" / "conversion_reaction_base.yaml")
+sbml_dir = str(APP_DIR / "models" / "conversion_reaction_base.xml")
 
 yaml2sbml.yaml2sbml(yaml_dir,sbml_dir)
 
 # generate the AMICI model
 model_name_base = "Conversion_Reaction_Base"
-amici_model_dir = 'ode_sbml/amici_files'
+amici_model_dir = str(APP_DIR / "ode_sbml" / "amici_files")
 
 amici_importer = amici.SbmlImporter(sbml_dir)
 amici_importer.sbml2amici(model_name_base, amici_model_dir)
@@ -195,8 +204,8 @@ import matplotlib.lines as mlines
 from matplotlib.legend_handler import HandlerTuple
 from tqdm import tqdm
 
-result_full = store.read_result(f"{STORAGE_FOR_REPEATED_EXPERIMENTS}res_4/result_full.hdf5")
-result_marginalized = store.read_result(f"{STORAGE_FOR_REPEATED_EXPERIMENTS}res_4/result_marginalized.hdf5")
+result_full = store.read_result(f"{STORAGE_FOR_REPEATED_EXPERIMENTS}/res_4/result_full.hdf5")
+result_marginalized = store.read_result(f"{STORAGE_FOR_REPEATED_EXPERIMENTS}/res_4/result_marginalized.hdf5")
 
 # samples_wrong_tp = result_wrong_tp.sample_result.trace_x[0, :, :4]
 samples_full = result_full.sample_result.trace_x[0, :, :4]
@@ -708,8 +717,9 @@ def plot_box_two_methods(
     xlabel: str,
     ylabel: str,
     title: str,
-    legend_labels=(r"Joint", r"Marginalized"), 
-    ax = None
+    legend_labels=(r"Joint", r"Marginalized"),
+    ax = None,
+    n_total = None
 ):
     """
     Plots side-by-side boxplots for both methods.
@@ -719,12 +729,20 @@ def plot_box_two_methods(
     full_list : list of arrays, one entry per x-tick (n_data value),
                 each array contains the values across random seeds.
     marg_list : same for marginalized.
+    n_total : optional (full_totals, marg_totals), number of runs per x-tick.
+              If given, "k/n" (k = non-NaN values) is printed above each box,
+              and groups with fewer than 3 values are drawn as dots.
     """
     if isinstance(full_list, np.ndarray):
         full_list = [full_list[i] for i in range(full_list.shape[0])]
     if isinstance(marg_list, np.ndarray):
         marg_list = [marg_list[i] for i in range(marg_list.shape[0])]
-    
+
+    # drop NaNs (missing/crashed setups) per group -- matplotlib otherwise
+    # silently omits the whole box for any group containing a NaN
+    full_list = [np.asarray(v, dtype=float)[~np.isnan(np.asarray(v, dtype=float))] for v in full_list]
+    marg_list = [np.asarray(v, dtype=float)[~np.isnan(np.asarray(v, dtype=float))] for v in marg_list]
+
     if ax is None:
         fig, ax = plt.subplots(figsize=(8, 6))
 
@@ -746,8 +764,23 @@ def plot_box_two_methods(
         )
         return bp
 
-    bp_full = make_boxplot(ax, full_list, x - width / 2, COLOR_FULL)
-    bp_marg = make_boxplot(ax, marg_list, x + width / 2, COLOR_MARGINALIZED)
+    if n_total is None:
+        bp_full = make_boxplot(ax, full_list, x - width / 2, COLOR_FULL)
+        bp_marg = make_boxplot(ax, marg_list, x + width / 2, COLOR_MARGINALIZED)
+    else:
+        for data_list, totals, offset, color, text_y in (
+            (full_list, n_total[0], -width / 2, COLOR_FULL, 1.08),
+            (marg_list, n_total[1], +width / 2, COLOR_MARGINALIZED, 1.01),
+        ):
+            # a box from fewer than 3 values pretends a spread: draw the dots
+            boxed = [v if len(v) >= 3 else np.array([]) for v in data_list]
+            make_boxplot(ax, boxed, x + offset, color)
+            for i, v in enumerate(data_list):
+                if 0 < len(v) < 3:
+                    ax.scatter(np.full(len(v), x[i] + offset), v, color=color, s=40, zorder=3)
+                ax.text(x[i] + offset, text_y, f"{len(v)}/{totals[i]}",
+                        transform=ax.get_xaxis_transform(), ha="center", va="bottom",
+                        color=color, fontsize=FONT_SIZE_TICKS - 3)
 
     # Legend proxies
     """
@@ -780,8 +813,9 @@ def plot_box_two_methods(
 
 
 
+
 """
-Figure 4 A: Number of parameters vs. number of data points 
+Figure 4 A: Number of parameters vs. number of data points
 """
 x_full = np.array([4 + n_time for n_time in X_FIXED], dtype=float).reshape(-1, 1)
 x_marg = np.array([4 for _ in X_FIXED], dtype=float).reshape(-1, 1)
@@ -800,8 +834,8 @@ Figure 4 Prep DF & Playground for plotting ESS and Sampling Walltime
 """
 # 1st: ESS per second vs. n_data for all three approaches (only for converged sampling runs)
 # read in pandas df
-per_experiment_df = pd.read_csv("/Users/jakobvanhoefer/Documents/PhD/Projects/Temporal Uncertainties/Application_ConversionReaction/per_experiment_df.csv", index_col=0)
-per_setup_df = pd.read_csv("/Users/jakobvanhoefer/Documents/PhD/Projects/Temporal Uncertainties/Application_ConversionReaction/per_setup_df.csv", index_col=0)
+per_experiment_df = pd.read_csv(str(APP_DIR / "per_experiment_df.csv"), index_col=0)
+per_setup_df = pd.read_csv(str(APP_DIR / "per_setup_df.csv"), index_col=0)
 
 """
 Set ESS_per_second + ESS to 0, and run_time_sampling to inf, 
@@ -1020,25 +1054,34 @@ plot_box_two_methods(
     full_list=[z_array_full[i] for i in range(len(X_FIXED))],
     marg_list=[z_array_marg[i] for i in range(len(X_FIXED))],
     xlabel=r"$n_t$",
-    ylabel="z-Score",
+    ylabel=r"max. $|z|$ over $\theta$",
     title=" ",
     ax=axes[1]
 )
 
+# Bonferroni-corrected 5 % threshold over the theta (see mcmc_diagnostics.py)
 axes[1].plot(
-    axes[1].get_xlim(), 
-    1.96*np.array([1, 1]),
+    axes[1].get_xlim(),
+    Z_THRESHOLD*np.array([1, 1]),
     "k--",
     linewidth=LINE_WIDTH,
-    label="95% threshold")
+    label="5% threshold (Bonferroni)")
 
 """
 Panel C: ESS/Second
 """
 ess_cols_full = [col for col in per_setup_df.columns if col.startswith("ESS_per_second_full_")]
-ess_array_full = per_setup_df[ess_cols_full].to_numpy()
+ess_array_full = per_setup_df[ess_cols_full].to_numpy(dtype=float)
 ess_cols_marg = [col for col in per_setup_df.columns if col.startswith("ESS_per_second_marginalized_")]
-ess_array_marg = per_setup_df[ess_cols_marg].to_numpy()
+ess_array_marg = per_setup_df[ess_cols_marg].to_numpy(dtype=float)
+
+# converged chains only (burn-in found, mcmc_diagnostics.burn_in); crashed runs
+# are NaN and not counted in n
+n_total = (np.sum(~np.isnan(ess_array_full), axis=1), np.sum(~np.isnan(ess_array_marg), axis=1))
+converged_full = per_setup_df[[c.replace("ESS_per_second", "geweke_burn_in") for c in ess_cols_full]].notna().to_numpy()
+converged_marg = per_setup_df[[c.replace("ESS_per_second", "geweke_burn_in") for c in ess_cols_marg]].notna().to_numpy()
+ess_array_full[~converged_full] = np.nan
+ess_array_marg[~converged_marg] = np.nan
 
 plot_box_two_methods(
     full_list=[ess_array_full[i] for i in range(len(X_FIXED))],
@@ -1046,7 +1089,8 @@ plot_box_two_methods(
     xlabel=r"$n_t$",
     ylabel="ESS/Second",
     title=" ",
-    ax=axes[2]
+    ax=axes[2],
+    n_total=n_total
 )
 
 plt.tight_layout()
@@ -1079,9 +1123,9 @@ due to the problem dimension)
 """
 import pypesto.sample as sample
 N_EXPERIMENT_CONVERGED = 4
-N_EXPERIMENT_NON_CONVERGED = 94
+N_EXPERIMENT_NON_CONVERGED = 150  # was 94 (n_t=40, seed 4); res_94 crashed (SVD) in the Sep-2026 rerun
 
-STORAG_BASE_DIR = "/Users/jakobvanhoefer/Documents/PhD/Projects/Temporal Uncertainties/Application_ConversionReaction"
+STORAG_BASE_DIR = str(APP_DIR)
 
 LB_WRONG_TP = np.array([-1, -1, -1, -1], dtype=float)
 UB_WRONG_TP = np.array([1, 1, 2, 2], dtype=float)
@@ -1095,19 +1139,12 @@ result_marginalized_converged = store.read_result(f"{STORAG_BASE_DIR}/res_{N_EXP
 result_full_non_converged = store.read_result(f"{STORAG_BASE_DIR}/res_{N_EXPERIMENT_NON_CONVERGED}/result_full.hdf5")
 result_marginalized_non_converged = store.read_result(f"{STORAG_BASE_DIR}/res_{N_EXPERIMENT_NON_CONVERGED}/result_marginalized.hdf5")
 
-# get the burn-in for all methods
-burn_in_full_converged = sample.geweke_test(result_full_converged)
-burn_in_marginalized_converged = sample.geweke_test(result_marginalized_converged)
+# whole chains on theta, no burn-in removed
+samples_full_converged = result_full_converged.sample_result.trace_x[0, :, :mcmc_diagnostics.N_THETA]
+samples_marginalized_converged = result_marginalized_converged.sample_result.trace_x[0, :, :mcmc_diagnostics.N_THETA]
 
-burn_in_full_non_converged = sample.geweke_test(result_full_non_converged)
-burn_in_marginalized_non_converged = sample.geweke_test(result_marginalized_non_converged)
-
-# extract parameter samples (only the ones _after_ burn-in...)
-samples_full_converged = result_full_converged.sample_result.trace_x[0, burn_in_full_converged:, :4]
-samples_marginalized_converged = result_marginalized_converged.sample_result.trace_x[0, burn_in_marginalized_converged:, :4]
-
-samples_full_non_converged = result_full_non_converged.sample_result.trace_x[0, burn_in_full_non_converged:, :4]
-samples_marginalized_non_converged = result_marginalized_non_converged.sample_result.trace_x[0, burn_in_marginalized_non_converged:, :4]
+samples_full_non_converged = result_full_non_converged.sample_result.trace_x[0, :, :mcmc_diagnostics.N_THETA]
+samples_marginalized_non_converged = result_marginalized_non_converged.sample_result.trace_x[0, :, :mcmc_diagnostics.N_THETA]
 
 N_D_CONVERGED = result_full_converged.sample_result.trace_x.shape[-1] - 4
 N_D_NON_CONVERGED = result_full_non_converged.sample_result.trace_x.shape[-1] - 4
@@ -1133,16 +1170,15 @@ fig.suptitle(
     y=1.02)
 """
 panels = [
-    (samples_full_converged,             burn_in_full_converged,             COLOR_FULL,         "Joint",        N_D_CONVERGED),
-    (samples_marginalized_converged,     burn_in_marginalized_converged,     COLOR_MARGINALIZED, "Marginalized", N_D_CONVERGED),
-    (samples_full_non_converged,         burn_in_full_non_converged,         COLOR_FULL,         "Joint",        N_D_NON_CONVERGED),
-    (samples_marginalized_non_converged, burn_in_marginalized_non_converged, COLOR_MARGINALIZED, "Marginalized", N_D_NON_CONVERGED),
+    (samples_full_converged,             COLOR_FULL,         "Joint",        N_D_CONVERGED),
+    (samples_marginalized_converged,     COLOR_MARGINALIZED, "Marginalized", N_D_CONVERGED),
+    (samples_full_non_converged,         COLOR_FULL,         "Joint",        N_D_NON_CONVERGED),
+    (samples_marginalized_non_converged, COLOR_MARGINALIZED, "Marginalized", N_D_NON_CONVERGED),
 ]
 
-for ax, (samples, burn_in, color, method_label, n_t) in zip(axs, panels):
-    indices_full = np.arange(burn_in, N_SAMPLES)
-    indices = indices_full[::PLOT_EVERY_NTH]
-    values  = samples[:len(indices_full):PLOT_EVERY_NTH, param_idx]
+for ax, (samples, color, method_label, n_t) in zip(axs, panels):
+    indices = np.arange(N_SAMPLES)[::PLOT_EVERY_NTH]
+    values  = samples[:N_SAMPLES:PLOT_EVERY_NTH, param_idx]
 
     ax.scatter(indices, values, color=color, s=S, alpha=0.06, rasterized=True)
     """
@@ -1152,11 +1188,11 @@ for ax, (samples, burn_in, color, method_label, n_t) in zip(axs, panels):
         pad=10)
     """
     # ax.set_xlabel("Sampling Index", fontsize=FONT_SIZE_AXES)
-    ax.set_xlim((burn_in, N_SAMPLES))
+    ax.set_xlim((0, N_SAMPLES))
     ax.set_ylim(LB_WRONG_TP[param_idx], UB_WRONG_TP[param_idx])
 
     # x ticks at 1e5, 3e5, 5e5, ... up to N_SAMPLES
-    xticks = [t for t in [1e5, 3e5, 5e5, 1e6, 3e6, 5e6] if burn_in <= t <= N_SAMPLES]
+    xticks = [t for t in [1e5, 3e5, 5e5, 1e6, 3e6, 5e6] if t <= N_SAMPLES]
     ax.set_xticks(xticks)
     ax.set_xticklabels(
         [r"$" + f"{t:.0e}".replace("e+0", r"\times 10^{").replace("e+", r"\times 10^{") + "}$"

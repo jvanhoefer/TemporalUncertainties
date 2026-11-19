@@ -21,7 +21,9 @@ import seaborn as sns
 import pandas as pd
 
 os.chdir(os.path.dirname(__file__))
-# os.chdir("/Users/jakobvanhoefer/Documents/PhD/Projects/Temporal Uncertainties/Application_didactic/")
+
+from pathlib import Path
+REPO_ROOT = Path(__file__).resolve().parents[1]
 
 #% Set up the constants
 
@@ -56,7 +58,8 @@ LINE_WIDTH = 3
 CAP_SIZE   = 6
 CAP_THICK  = LINE_WIDTH 
 
-FIGURE_STORE_DIR = "/Users/jakobvanhoefer/Documents/PhD/Projects/Temporal Uncertainties/Figures Paper/building_blocks"
+FIGURE_STORE_DIR = str(REPO_ROOT / "Figures Paper" / "building_blocks")
+os.makedirs(FIGURE_STORE_DIR, exist_ok=True)
 
 
 COLOR_FULL = [0, 78/255, 159/255] # blue
@@ -209,7 +212,7 @@ for col, ax in enumerate([ax_A0, ax_A1, ax_A2]):
     ax.spines['bottom'].set_linewidth(LINE_WIDTH)
     ax.tick_params(axis='both', labelsize=FONT_SIZE_TICKS)
 
-axes[0].set_ylabel('x(t)', fontsize=FONT_SIZE_AXES)
+ax_A0.set_ylabel('x(t)', fontsize=FONT_SIZE_AXES)
 
 # plt.tight_layout()
 # plt.show()
